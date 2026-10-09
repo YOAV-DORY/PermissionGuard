@@ -31,6 +31,31 @@ class ApprovalResponse:
         return "session" if self.scope == "session" else "user"
 
 
+def describe_request(
+    request: ActionRequest, reason: str, details: dict[str, Any] | None = None
+) -> list[tuple[str, Any]]:
+    """The facts a human needs to approve safely, as (label, value) rows."""
+    rows: list[tuple[str, Any]] = [("action", request.action), ("target", request.target)]
+    rows.extend((details or {}).items())
+    if request.params:
+        rows.append(("params", request.params))
+    rows.append(("reason", reason))
+    return rows
+
+
+def format_rows(rows: list[tuple[str, Any]]) -> list[str]:
+    width = max(len(name) for name, _ in rows)
+    return [f"  {name:<{width}} : {value}" for name, value in rows]
+
+
+class ApprovalUnavailable(Exception):
+    """No human can be asked right now (for example the MCP client cannot show prompts).
+
+    Raised from an approver, the guard turns it into a denial that is attributed to the
+    system, not to a user decision.
+    """
+
+
 class ApprovalProvider(Protocol):
     def ask(self, request: ActionRequest, reason: str, details: dict[str, Any] | None = None) -> ApprovalResponse: ...
 
@@ -60,17 +85,10 @@ class CliApprover:
             self._output(f"[approval] {request.action} {request.target!r} auto-approved (session grant)")
             return ApprovalResponse(approved=True, scope="session")
 
-        rows: list[tuple[str, Any]] = [("action", request.action), ("target", request.target)]
-        rows.extend((details or {}).items())
-        if request.params:
-            rows.append(("params", request.params))
-        rows.append(("reason", reason))
-        width = max(len(name) for name, _ in rows)
-
         self._output("")
         self._output("[approval] The assistant wants to perform an action that needs your approval:")
-        for name, value in rows:
-            self._output(f"  {name:<{width}} : {value}")
+        for line in format_rows(describe_request(request, reason, details)):
+            self._output(line)
 
         while True:
             try:

@@ -82,11 +82,13 @@ permission_guard/
   assistant.py   tool-use loop: every tool call the model makes goes through the guard
   llm.py         AnthropicLLM: adapter for the official Anthropic SDK (optional dependency)
   simulated.py   GullibleLLM: offline stand-in for a model that obeys injected instructions
+  mcp_server.py  the guard as an MCP server (stdio); approval through MCP elicitation
   __main__.py    `python -m permission_guard verify` for audit logs
 policies/default.yaml   the default policy
 demo.py                 end-to-end demonstration with a scripted assistant
 demo_injection.py       prompt-injection demo: simulated or real Claude (--live)
 requirements-llm.txt    core + the optional Anthropic SDK
+requirements-mcp.txt    core + the optional MCP SDK
 THREAT_MODEL.md         what is defended, what is not
 docs/*.svg              animated terminal recordings used in this README
 scripts/                make_demo_svg.py regenerates the recordings from real runs
@@ -300,6 +302,79 @@ How the loop is built ([`assistant.py`](permission_guard/assistant.py)):
 - File contents and command output are untrusted data. The guard does not try to detect
   injection in text; it limits what any text can make the assistant do.
 
+## Use it from any MCP client
+
+`permission_guard.mcp_server` runs the guard as an [MCP](https://modelcontextprotocol.io/)
+server over stdio. A client gets four tools (`read_file`, `write_file`, `delete_file`,
+`run_command`); every call goes through the same policy, approval flow and audit log as the
+rest of this project.
+
+```bash
+.venv/bin/pip install -r requirements-mcp.txt
+```
+
+Register it with a client. For Claude Code (use absolute paths; the client starts the
+server from its own working directory):
+
+```bash
+claude mcp add permission-guard -- /ABSOLUTE/PATH/.venv/bin/python -m permission_guard.mcp_server --sandbox /ABSOLUTE/PATH/sandbox --audit-file /ABSOLUTE/PATH/audit.log.jsonl
+```
+
+For clients configured with JSON:
+
+```json
+{
+  "mcpServers": {
+    "permission-guard": {
+      "command": "/ABSOLUTE/PATH/.venv/bin/python",
+      "args": ["-m", "permission_guard.mcp_server", "--sandbox", "/ABSOLUTE/PATH/sandbox"]
+    }
+  }
+}
+```
+
+Options: `--policy FILE`, `--sandbox DIR`, `--audit-file FILE`, and `--approval elicit|deny`.
+
+**Approval happens in the client.** A stdio server has no terminal (stdin and stdout carry the
+protocol), so when the policy says `ask`, the server uses MCP *elicitation*: the client shows
+the human the resolved path, the parsed argv or a preview of the content, with three answers:
+`approve once`, `approve for this session`, `deny`.
+
+```
+PermissionGuard needs your approval for an action the assistant requested:
+
+  action        : delete_file
+  target        : report.txt
+  resolved_path : /home/me/project/sandbox/report.txt
+  reason        : delete_file inside sandbox is 'ask' by policy
+```
+
+What fails closed:
+
+- the client does not support elicitation: calls that need approval are refused, allowed
+  calls (such as reads) still work;
+- `--approval deny`: nothing is ever asked, anything that needs approval is refused;
+- a declined, cancelled or unreadable answer is "no";
+- if the world changes between the question and the action so that approval is now needed
+  but was not asked, the call is refused.
+
+**Two things to know before relying on it:**
+
+1. The server governs only the calls made *through it*. If the client also has its own shell or
+   file tools, those are not restricted by this policy. Disable them for real enforcement.
+2. The elicitation is only as trustworthy as the client that renders it. An agentic client may
+   answer elicitations automatically instead of asking a person; use a client that puts the
+   prompt in front of a human.
+
+How it is built ([`mcp_server.py`](permission_guard/mcp_server.py)): the SDK's
+`Resolve`/`Elicit` mechanism runs a small resolver *before* the tool body. The resolver asks
+the policy whether this call needs approval and, if so, has the SDK put the question to the
+human. The tool body then runs the guard with the answer already in hand, so the guard never
+blocks on a person. This works on both MCP protocol generations (the older mid-call
+server-to-client request and the newer round-trip form); plain `ctx.elicit()` only works on the
+older one. The tests drive a real MCP client against the server on both, including a real stdio
+subprocess.
+
 ## Using the guard from code
 
 ```python
@@ -315,8 +390,8 @@ result = guard.handle("read_file", "notes.txt")
 print(result.decision, result.executed, result.output)
 ```
 
-`guard.handle(action, target, **params)` is the single entry point an MCP server (or any
-other transport) would call per tool request.
+`guard.handle(action, target, **params)` is the single entry point every front end uses: the
+assistant loop, the MCP server, and your own code.
 
 ## Design decisions and tradeoffs
 
@@ -370,14 +445,17 @@ errors, so a typo cannot silently weaken the policy.
 network programs can exfiltrate, and this is a policy-level sandbox, not an OS jail.
 These are listed, each with an `xfail` test, in [THREAT_MODEL.md](THREAT_MODEL.md).
 
-**MCP readiness.** Tools are plain functions, the guard has a transport-agnostic
-`handle()`, and approval is pluggable. Wrapping this in a FastMCP server means registering
-one tool per action that forwards to `guard.handle()`. One caveat for later: an MCP stdio
-server cannot prompt on stdin, so approval must go through MCP elicitation or another channel.
+**One guard, three front ends.** The scripted demo, the LLM loop and the MCP server all call
+`guard.handle()`; none of them contains policy logic. Approval is a pluggable protocol, which is
+what made the MCP version possible: a stdio server cannot prompt on stdin (it carries the
+protocol), so approval moved to MCP elicitation without touching the guard. The one design
+wrinkle is that the guard is synchronous while elicitation is asynchronous, so the MCP front end
+collects the answer first (a resolver that runs before the tool body) and then runs the guard
+off the event loop with that answer already in hand.
 
 ## Future work
 
-- Expose the guard as an MCP server and use MCP elicitation for approval.
+- MCP over streamable HTTP with authentication (stdio only for now, on purpose).
 - Sign audit entries with a key held elsewhere to close the full-rewrite gap.
 - CI, a demo recording, and a `permission-guard check "<command>"` dry-run command.
 - Per-policy glob rules, rate limits, and expiring session grants.

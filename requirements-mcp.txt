@@ -1,0 +1,3 @@
+# Core dependencies plus the optional MCP server (python -m permission_guard.mcp_server).
+-r requirements.txt
+mcp>=2.3,<3

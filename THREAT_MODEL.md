@@ -35,6 +35,26 @@ assumes injection will sometimes work and limits the damage:
 with real Claude (`--live`). The simulation is a worst case, not a claim about any model.
 A live model may resist the injection, which means the guard stays idle; that is expected.
 
+## MCP server
+
+`permission_guard.mcp_server` puts the guard behind an MCP interface (stdio only). What that
+changes for the threat model:
+
+- **Scope.** Only calls made through this server are governed. A client that also has its own
+  shell or file tools is not restricted by this policy.
+- **Trusted computing base grows by one.** The human's answer arrives through the MCP client's
+  elicitation UI. A buggy or malicious client, or an agentic client that auto-answers
+  elicitations, can approve on the human's behalf. The server cannot tell the difference.
+- **The model cannot approve itself.** The approval is resolved before the tool body runs and is
+  not part of the tool's input schema, so a model cannot pre-fill or forge it. For the newer
+  protocol, the SDK seals the multi-round state (authenticated encryption, bound to the request).
+- **Fail closed** when the client cannot elicit, when prompts are disabled, when the answer is
+  unreadable, or when approval turns out to be needed but was not asked.
+- **No network exposure.** stdio only; there is deliberately no HTTP transport, because there is
+  no authentication layer yet.
+- **Privileges.** The server runs with the privileges of whoever started it. The sandbox is a
+  policy boundary, not an OS boundary.
+
 ## What is enforced
 
 | Risk | Control | Where | Tested in |

@@ -25,8 +25,8 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install dependencies (core + the optional Anthropic SDK used by the LLM tests)
-        run: python -m pip install -r requirements-llm.txt
+      - name: Install dependencies (core + the optional Anthropic SDK and MCP SDK used by their tests)
+        run: python -m pip install -r requirements-llm.txt -r requirements-mcp.txt
 
       - name: Run tests
         run: python -m pytest -v
