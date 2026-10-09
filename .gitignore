@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+audit.log.jsonl
+sandbox/*
+!sandbox/.gitkeep

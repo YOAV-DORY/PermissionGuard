@@ -1,0 +1,44 @@
+# Default PermissionGuard policy.
+#
+# Decisions: allow | deny | ask
+#
+# Path-based actions (read_file, write_file, delete_file) are always denied when the
+# resolved target lies outside sandbox_root. The values below apply only to targets
+# that are inside the sandbox.
+
+sandbox_root: ./sandbox
+
+actions:
+  read_file:
+    inside_sandbox: allow
+  write_file:
+    inside_sandbox: ask
+  delete_file:
+    inside_sandbox: ask
+  run_command:
+    default: ask
+
+# Commands matching any of these regexes are denied before anything else is checked.
+# Patterns are matched with re.search, case-sensitive.
+dangerous_commands:
+  # rm with both a recursive (-r/-R/--recursive) and a force (-f/--force) flag,
+  # whether combined (-rf) or separate (-r -f).
+  - id: rm-recursive-force
+    pattern: '\brm\b(?=.*\s(?:-[A-Za-z]*[rR]|--recursive))(?=.*\s(?:-[A-Za-z]*f|--force))'
+    reason: recursive force delete
+  # Listed before the sudo rule so "curl ... | sudo sh" is reported as a pipe-to-shell.
+  - id: pipe-remote-to-shell
+    pattern: '\b(curl|wget)\b.*\|\s*(sudo\s+)?(sh|bash|zsh|dash)\b'
+    reason: pipes remote script into a shell
+  - id: sudo
+    pattern: '(^|[\s;&|])sudo\b'
+    reason: privilege escalation
+  - id: write-system-file
+    pattern: '(>{1,2}|\btee\b)\s*(/etc/|/usr/|/bin/|/sbin/|/System/|/boot/|/Library/)'
+    reason: writes to a system file
+  - id: modify-system-file
+    pattern: '\b(chmod|chown|mv|cp|rm|ln)\b.*\s(/etc/|/usr/|/bin/|/sbin/|/System/|/boot/|/Library/)'
+    reason: modifies a system file
+  - id: disk-destructive
+    pattern: '\bmkfs\b|\bdd\b.*\bof=/dev/'
+    reason: destructive disk operation
