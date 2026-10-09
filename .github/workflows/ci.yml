@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, Python 3.11)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The sandbox relies on POSIX file APIs (openat, O_NOFOLLOW), so test both families.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      - name: Run the demo end to end
+        run: python demo.py --auto-approve --sandbox "$RUNNER_TEMP/sandbox" --audit-file "$RUNNER_TEMP/audit.jsonl"
+
+      - name: Verify the audit log written by the demo
+        run: python -m permission_guard verify "$RUNNER_TEMP/audit.jsonl"
