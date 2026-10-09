@@ -2,13 +2,15 @@
 #
 # Decisions: allow | deny | ask
 #
-# Path-based actions (read_file, write_file, delete_file) are always denied when the
-# resolved target lies outside sandbox_root. The values below apply only to targets
-# that are inside the sandbox.
+# The policy fails closed: anything not described here is denied, and a policy
+# file with a typo or an invalid value refuses to load.
 
 sandbox_root: ./sandbox
 
 actions:
+  # Path-based actions are always denied when the target resolves outside
+  # sandbox_root, is absolute, or passes through a symlink. The verdicts below
+  # apply to targets that are inside the sandbox.
   read_file:
     inside_sandbox: allow
   write_file:
@@ -16,29 +18,114 @@ actions:
   delete_file:
     inside_sandbox: ask
   run_command:
+    # Verdict for a command that passes every check in the `commands` section.
     default: ask
 
-# Commands matching any of these regexes are denied before anything else is checked.
-# Patterns are matched with re.search, case-sensitive.
-dangerous_commands:
-  # rm with both a recursive (-r/-R/--recursive) and a force (-f/--force) flag,
-  # whether combined (-rf) or separate (-r -f).
-  - id: rm-recursive-force
-    pattern: '\brm\b(?=.*\s(?:-[A-Za-z]*[rR]|--recursive))(?=.*\s(?:-[A-Za-z]*f|--force))'
-    reason: recursive force delete
-  # Listed before the sudo rule so "curl ... | sudo sh" is reported as a pipe-to-shell.
-  - id: pipe-remote-to-shell
-    pattern: '\b(curl|wget)\b.*\|\s*(sudo\s+)?(sh|bash|zsh|dash)\b'
-    reason: pipes remote script into a shell
-  - id: sudo
-    pattern: '(^|[\s;&|])sudo\b'
-    reason: privilege escalation
-  - id: write-system-file
-    pattern: '(>{1,2}|\btee\b)\s*(/etc/|/usr/|/bin/|/sbin/|/System/|/boot/|/Library/)'
-    reason: writes to a system file
-  - id: modify-system-file
-    pattern: '\b(chmod|chown|mv|cp|rm|ln)\b.*\s(/etc/|/usr/|/bin/|/sbin/|/System/|/boot/|/Library/)'
-    reason: modifies a system file
-  - id: disk-destructive
-    pattern: '\bmkfs\b|\bdd\b.*\bof=/dev/'
-    reason: destructive disk operation
+limits:
+  max_read_bytes: 1048576        # 1 MiB
+  max_write_bytes: 1048576       # 1 MiB
+  max_output_bytes: 65536        # 64 KiB of captured command output
+  command_timeout_seconds: 10
+  max_command_length: 4096
+
+commands:
+  # What to do with a program that is not on `allowed_programs`:
+  #   deny - refuse (default, safest)
+  #   ask  - let a human decide (closest to "every other command needs approval")
+  unknown_program: deny
+
+  # Programs that may run (after approval, see actions.run_command.default).
+  # Matched case-insensitively against the program name; globs allowed.
+  allowed_programs:
+    - ls
+    - cat
+    - head
+    - tail
+    - wc
+    - echo
+    - pwd
+    - grep
+    - sort
+    - uniq
+    - diff
+    - date
+    - whoami
+    - mkdir
+    - touch
+    - cp
+    - mv
+    - rm
+    - curl
+    - wget
+    - git
+    - "python*"
+
+  # Programs that may only be run with these first arguments.
+  subcommands:
+    git: [status, log, diff, show, branch]
+
+  downloaders: [curl, wget]
+  shells: [sh, bash, zsh, dash, ksh, csh, tcsh, fish]
+  allowed_url_schemes: [http, https]
+
+  # Used to label "touches a system path" denials.
+  system_paths:
+    - /etc
+    - /usr
+    - /bin
+    - /sbin
+    - /lib
+    - /boot
+    - /dev
+    - /proc
+    - /sys
+    - /var
+    - /root
+    - /System
+    - /Library
+    - /private
+    - /Applications
+
+  # Programs that are denied outright, with the reason shown in the audit log.
+  denied_programs:
+    - id: sudo
+      reason: privilege escalation
+      names: [sudo, su, doas, pkexec]
+    - id: command-wrapper
+      reason: wrapper programs hide the real command from the policy
+      names: [env, xargs, nohup, nice, time, timeout, exec, command, busybox, stdbuf, watch, setsid, chroot, nsenter, unshare, script, eval]
+    - id: disk-destructive
+      reason: destructive disk operation
+      names: [dd, "mkfs*", "newfs*", fdisk, parted, diskutil, shred, wipefs]
+    - id: system-control
+      reason: shuts down or reconfigures the machine
+      names: [shutdown, reboot, halt, poweroff, init, launchctl, systemctl]
+    - id: permission-change
+      reason: changes permissions or ownership
+      names: [chmod, chown, chgrp, chattr, setfacl]
+    - id: link-creation
+      reason: links can point outside the sandbox
+      names: [ln, link]
+
+  # Option-level rules for allowed programs. `short` letters are matched inside
+  # combined flags (-rf contains r and f); `long` options match exactly.
+  forbidden_options:
+    - id: rm-recursive
+      reason: recursive delete
+      programs: [rm]
+      short: [r, R]
+      long: [--recursive, --no-preserve-root]
+    - id: inline-code
+      reason: runs code given on the command line
+      programs: ["python*"]
+      short: [c, m]
+    - id: curl-config
+      reason: config files can redirect output anywhere
+      programs: [curl]
+      short: [K]
+      long: [--config]
+    - id: wget-execute
+      reason: executes wgetrc commands
+      programs: [wget]
+      short: [e]
+      long: [--execute]

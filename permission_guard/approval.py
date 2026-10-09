@@ -2,12 +2,16 @@
 
 ``ApprovalProvider`` is a small protocol so the guard does not care whether the
 answer comes from a terminal prompt, a test double, or (later) an MCP client.
+
+The ``details`` argument carries facts the human needs to decide safely (the
+resolved path, the parsed argv, a preview of the content to be written) so the
+prompt never asks for approval of something the human cannot see.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from .models import ActionRequest
 
@@ -28,15 +32,15 @@ class ApprovalResponse:
 
 
 class ApprovalProvider(Protocol):
-    def ask(self, request: ActionRequest, reason: str) -> ApprovalResponse: ...
+    def ask(self, request: ActionRequest, reason: str, details: dict[str, Any] | None = None) -> ApprovalResponse: ...
 
 
 class CliApprover:
     """Interactive y / n / s prompt on the command line.
 
     ``s`` approves the request and remembers (action, target) for the rest of
-    the session, so identical requests are not prompted again.
-    ``input_fn`` and ``output_fn`` are injectable for testing.
+    the session, so identical requests are not prompted again. Closed input
+    (EOF) counts as "no". ``input_fn`` and ``output_fn`` are injectable for tests.
     """
 
     PROMPT = "  Approve? [y]es / [n]o / [s]ession (approve for rest of session): "
@@ -50,22 +54,30 @@ class CliApprover:
         self._output = output_fn
         self.session_grants: set[tuple[str, str]] = set()
 
-    def ask(self, request: ActionRequest, reason: str) -> ApprovalResponse:
+    def ask(self, request: ActionRequest, reason: str, details: dict[str, Any] | None = None) -> ApprovalResponse:
         key = (request.action, request.target)
         if key in self.session_grants:
             self._output(f"[approval] {request.action} {request.target!r} auto-approved (session grant)")
             return ApprovalResponse(approved=True, scope="session")
 
+        rows: list[tuple[str, Any]] = [("action", request.action), ("target", request.target)]
+        rows.extend((details or {}).items())
+        if request.params:
+            rows.append(("params", request.params))
+        rows.append(("reason", reason))
+        width = max(len(name) for name, _ in rows)
+
         self._output("")
         self._output("[approval] The assistant wants to perform an action that needs your approval:")
-        self._output(f"  action : {request.action}")
-        self._output(f"  target : {request.target}")
-        if request.params:
-            self._output(f"  params : {request.params}")
-        self._output(f"  reason : {reason}")
+        for name, value in rows:
+            self._output(f"  {name:<{width}} : {value}")
 
         while True:
-            answer = self._input(self.PROMPT).strip().lower()
+            try:
+                answer = self._input(self.PROMPT).strip().lower()
+            except EOFError:
+                self._output("  (no input available - denying)")
+                return ApprovalResponse(approved=False, scope="denied")
             if answer in ("y", "yes"):
                 return ApprovalResponse(approved=True, scope="once")
             if answer in ("n", "no", ""):
@@ -83,7 +95,9 @@ class AutoApprover:
         self._approve = approve
         self._scope = scope if approve else "denied"
         self.calls: list[ActionRequest] = []
+        self.details: list[dict[str, Any]] = []
 
-    def ask(self, request: ActionRequest, reason: str) -> ApprovalResponse:
+    def ask(self, request: ActionRequest, reason: str, details: dict[str, Any] | None = None) -> ApprovalResponse:
         self.calls.append(request)
+        self.details.append(dict(details or {}))
         return ApprovalResponse(approved=self._approve, scope=self._scope)

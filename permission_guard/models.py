@@ -17,6 +17,17 @@ class Decision(str, Enum):
 
 
 @dataclass(frozen=True)
+class Limits:
+    """Resource limits enforced by the policy (pre-checks) and the tools (hard stops)."""
+
+    max_read_bytes: int = 1_048_576
+    max_write_bytes: int = 1_048_576
+    max_output_bytes: int = 65_536
+    command_timeout_seconds: int = 10
+    max_command_length: int = 4_096
+
+
+@dataclass(frozen=True)
 class ActionRequest:
     """A single action the assistant wants to perform.
 
@@ -31,16 +42,25 @@ class ActionRequest:
 
 @dataclass(frozen=True)
 class PolicyResult:
-    """What the policy engine decided and why."""
+    """What the policy engine decided and why.
+
+    ``details`` carries facts the approval prompt should show to a human
+    (resolved path, parsed argv, content preview). It is not part of equality.
+    """
 
     decision: Decision
     reason: str
     rule_id: str
+    details: dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 @dataclass
 class AuditEntry:
-    """One line in the audit log. Every field is required for traceability."""
+    """One line in the audit log.
+
+    ``prev_hash`` and ``hash`` form a hash chain filled in by ``AuditLog.append``;
+    callers leave them empty.
+    """
 
     timestamp: str
     action: str
@@ -49,6 +69,8 @@ class AuditEntry:
     reason: str
     approver: str
     result: str = ""
+    prev_hash: str = ""
+    hash: str = ""
 
     @staticmethod
     def now() -> str:

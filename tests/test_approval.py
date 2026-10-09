@@ -7,7 +7,7 @@ from permission_guard.approval import AutoApprover, CliApprover
 
 
 def make_approver(answers: list[str]):
-    """Return a CliApprover fed from a scripted list plus the list of prompts it issued."""
+    """Return a CliApprover fed from a scripted list plus the prompts it issued."""
     prompts: list[str] = []
     outputs: list[str] = []
 
@@ -53,6 +53,17 @@ def test_invalid_answer_reprompts():
     assert any("Please answer" in line for line in outputs)
 
 
+def test_closed_input_denies():
+    def eof(_: str) -> str:
+        raise EOFError
+
+    outputs: list[str] = []
+    approver = CliApprover(input_fn=eof, output_fn=outputs.append)
+    response = approver.ask(REQ, "r")
+    assert response.approved is False
+    assert any("no input" in line for line in outputs)
+
+
 def test_session_approval_skips_prompt_next_time():
     approver, prompts, _ = make_approver(["s"])
     first = approver.ask(REQ, "r")
@@ -82,18 +93,40 @@ def test_session_grant_does_not_leak_to_other_actions():
     assert len(prompts) == 2
 
 
-def test_prompt_shows_action_target_and_reason():
+def test_denied_request_is_not_remembered():
+    approver, prompts, _ = make_approver(["n", "y"])
+    assert approver.ask(REQ, "r").approved is False
+    assert approver.ask(REQ, "r").approved is True
+    assert len(prompts) == 2
+
+
+def test_prompt_shows_action_target_reason_and_params():
     approver, _, outputs = make_approver(["y"])
-    approver.ask(ActionRequest("run_command", "ls -la", {"timeout": 5}), "command needs approval")
+    approver.ask(ActionRequest("run_command", "ls -la", {"flag": 5}), "command needs approval")
     text = "\n".join(outputs)
     assert "run_command" in text
     assert "ls -la" in text
     assert "command needs approval" in text
-    assert "timeout" in text
+    assert "flag" in text
 
 
-def test_auto_approver_records_calls():
+def test_prompt_shows_details_so_the_human_sees_what_they_approve():
+    approver, _, outputs = make_approver(["y"])
+    details = {
+        "resolved": "/abs/sandbox/notes.txt",
+        "argv": ["grep", "-r", "two words", "."],
+        "preview": "'hello'",
+    }
+    approver.ask(ActionRequest("run_command", "grep -r 'two words' ."), "r", details)
+    text = "\n".join(outputs)
+    assert "/abs/sandbox/notes.txt" in text
+    assert "['grep', '-r', 'two words', '.']" in text
+    assert "'hello'" in text
+
+
+def test_auto_approver_records_calls_and_details():
     approver = AutoApprover(approve=False)
-    response = approver.ask(REQ, "r")
+    response = approver.ask(REQ, "r", {"resolved_path": "/x"})
     assert response.approved is False
     assert approver.calls == [REQ]
+    assert approver.details == [{"resolved_path": "/x"}]

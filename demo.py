@@ -51,13 +51,17 @@ def main() -> None:
     mode.add_argument("--auto-approve", action="store_true", help="approve every prompt without asking")
     mode.add_argument("--auto-deny", action="store_true", help="deny every prompt without asking")
     parser.add_argument("--keep-log", action="store_true", help="append to the existing audit log instead of starting fresh")
+    parser.add_argument("--sandbox", type=Path, default=SANDBOX, help="sandbox directory (default: ./sandbox)")
+    parser.add_argument("--audit-file", type=Path, default=AUDIT_FILE, help="audit log path (default: ./audit.log.jsonl)")
     args = parser.parse_args()
+    sandbox: Path = args.sandbox
+    audit_file: Path = args.audit_file
 
     # Fresh state for a repeatable demo.
-    SANDBOX.mkdir(exist_ok=True)
-    (SANDBOX / SAMPLE_FILE).write_text(SAMPLE_CONTENT, encoding="utf-8")
-    if not args.keep_log and AUDIT_FILE.exists():
-        AUDIT_FILE.unlink()
+    sandbox.mkdir(parents=True, exist_ok=True)
+    (sandbox / SAMPLE_FILE).write_text(SAMPLE_CONTENT, encoding="utf-8")
+    if not args.keep_log and audit_file.exists():
+        audit_file.unlink()
 
     if args.auto_approve:
         approver = AutoApprover(approve=True)
@@ -67,14 +71,14 @@ def main() -> None:
         approver = CliApprover()
 
     guard = PermissionGuard(
-        policy=PolicyEngine.from_yaml(POLICY_FILE, sandbox_root=SANDBOX),
-        audit=AuditLog(AUDIT_FILE),
+        policy=PolicyEngine.from_yaml(POLICY_FILE, sandbox_root=sandbox),
+        audit=AuditLog(audit_file),
         approver=approver,
     )
 
     print("=" * 72)
     print("PermissionGuard demo - simulated assistant session")
-    print(f"sandbox : {SANDBOX}")
+    print(f"sandbox : {sandbox}")
     print(f"policy  : {POLICY_FILE.relative_to(PROJECT_ROOT)}")
     print("=" * 72)
 
@@ -90,9 +94,10 @@ def main() -> None:
             print(f"    error: {result.error}")
 
     print("\n" + "=" * 72)
-    print(f"Audit log ({AUDIT_FILE.relative_to(PROJECT_ROOT)})")
+    print(f"Audit log ({audit_file})")
     print("=" * 72)
     print(guard.audit.format_table())
+    print(f"\nIntegrity check: {guard.audit.verify()}")
 
 
 if __name__ == "__main__":
