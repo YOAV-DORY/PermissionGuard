@@ -25,8 +25,8 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+      - name: Install dependencies (core + the optional Anthropic SDK used by the LLM tests)
+        run: python -m pip install -r requirements-llm.txt
 
       - name: Run tests
         run: python -m pytest -v
@@ -36,3 +36,6 @@ jobs:
 
       - name: Verify the audit log written by the demo
         run: python -m permission_guard verify "$RUNNER_TEMP/audit.jsonl"
+
+      - name: Run the prompt-injection demo (offline simulation, no API key)
+        run: python demo_injection.py --auto-deny --sandbox "$RUNNER_TEMP/sandbox2" --audit-file "$RUNNER_TEMP/audit2.jsonl"

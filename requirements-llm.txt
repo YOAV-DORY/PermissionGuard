@@ -1,0 +1,3 @@
+# Core dependencies plus the optional LLM integration (demo_injection.py --live).
+-r requirements.txt
+anthropic>=1.13

@@ -18,6 +18,23 @@ every attempt leaves evidence.
 | Attacker with code execution as the same OS user | Can bypass anything in-process. | **No** |
 | Malicious human operator | Approves things on purpose. | **No** |
 
+## Prompt injection
+
+The main way a well-behaved assistant turns hostile is text it reads: a file, a web page,
+a tool result. PermissionGuard does **not** try to recognise injected text. Instead it
+assumes injection will sometimes work and limits the damage:
+
+- everything the assistant does goes through the same policy, no matter who "asked" for it;
+- the policy never reads the assistant's reasoning or the conversation, so there is nothing
+  to talk it out of;
+- actions that survive the policy but are risky still need a human, who sees the exact
+  path / argv / content;
+- the tool results are the *only* channel back to the model, and they are plain data.
+
+`demo_injection.py` shows this with a simulated assistant that obeys a poisoned file and
+with real Claude (`--live`). The simulation is a worst case, not a claim about any model.
+A live model may resist the injection, which means the guard stays idle; that is expected.
+
 ## What is enforced
 
 | Risk | Control | Where | Tested in |
@@ -33,6 +50,7 @@ every attempt leaves evidence.
 | Path arguments that leave the sandbox | Every path-like argument (including `--opt=value` and glued `-o/path`) must stay inside; URLs limited to http(s) | `commands.py` | `test_policy.py` |
 | Resource abuse | Read/write size caps, command timeout (whole process group killed), output cap, command length cap | `tools.py`, `policy.py` | `test_tools.py` |
 | Secret leakage to child processes | Children get a scrubbed environment (`PATH` with absolute entries only, `HOME`, `LANG`) and no stdin | `tools.py` | `test_tools.py` |
+| Assistant tries to override limits or smuggle fields | Only the documented fields of a tool call are used; `limits` in tool input is ignored; malformed calls never reach the guard | `assistant.py`, `guard.py` | `test_assistant.py`, `test_guard.py` |
 | Approving blind | The approval prompt shows the resolved absolute path, the parsed argv, and a content preview for writes | `approval.py`, `policy.py` | `test_approval.py`, `test_guard.py` |
 | Bad policy file | Unknown keys, bad verdicts, wrong types refuse to load; an empty policy denies everything | `policy.py` | `test_policy_config.py` |
 | Crashes turning into "allow" | Policy exception = deny; approver exception or closed stdin = deny; tool exceptions are caught and logged | `guard.py`, `approval.py` | `test_guard.py` |
@@ -68,6 +86,10 @@ is ever fixed, that test starts failing and must be turned into a normal test.
    (macOS and Linux). Windows is not supported.
 10. **Single user, single machine.** Concurrent writers are serialised with `flock`, which
     does not protect against writers on a network filesystem that ignores locks.
+
+11. **The model can still talk.** The guard controls actions, not words. A hijacked assistant
+    can put misleading text in its answer to the user (for example, claim a blocked action
+    succeeded). Show users the audit log, not only the assistant's summary.
 
 ## Out of scope for this version
 
