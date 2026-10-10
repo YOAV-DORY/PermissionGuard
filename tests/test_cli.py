@@ -80,3 +80,54 @@ def test_check_works_as_a_module_with_the_default_policy():
     )
     assert proc.returncode == 1
     assert proc.stdout.startswith("DENY")
+
+
+# ---------------------------------------------------------------- verify --sandbox
+
+
+def make_log_with_a_write(tmp_path: Path):
+    from permission_guard import AuditLog, AutoApprover, PermissionGuard, PolicyEngine
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    log_path = tmp_path / "audit.jsonl"
+    guard = PermissionGuard(
+        PolicyEngine.from_yaml(DEFAULT_POLICY, sandbox_root=sandbox), AuditLog(log_path), AutoApprover(approve=True)
+    )
+    guard.handle("write_file", "plan.txt", content="the plan")
+    return sandbox, log_path
+
+
+def test_verify_with_sandbox_confirms_matching_files(tmp_path: Path, capsys):
+    sandbox, log_path = make_log_with_a_write(tmp_path)
+    assert main(["verify", str(log_path), "--sandbox", str(sandbox)]) == 0
+    out = capsys.readouterr().out
+    assert "OK: 2 entries" in out and "content check: OK, 1 audited write(s)" in out
+
+
+def test_verify_with_sandbox_warns_when_a_file_changed(tmp_path: Path, capsys):
+    sandbox, log_path = make_log_with_a_write(tmp_path)
+    (sandbox / "plan.txt").write_text("not the plan")
+    assert main(["verify", str(log_path), "--sandbox", str(sandbox)]) == 0  # the chain itself is fine
+    out = capsys.readouterr().out
+    assert "1 of 1 audited write(s) no longer match" in out and "plan.txt" in out
+
+
+def test_verify_strict_exits_1_when_a_file_changed(tmp_path: Path, capsys):
+    sandbox, log_path = make_log_with_a_write(tmp_path)
+    (sandbox / "plan.txt").write_text("not the plan")
+    assert main(["verify", str(log_path), "--sandbox", str(sandbox), "--strict"]) == 1
+
+
+def test_verify_without_sandbox_does_not_look_at_files(tmp_path: Path, capsys):
+    _, log_path = make_log_with_a_write(tmp_path)
+    assert main(["verify", str(log_path)]) == 0
+    assert "content check" not in capsys.readouterr().out
+
+
+def test_a_broken_chain_fails_before_any_content_check(tmp_path: Path, capsys):
+    sandbox, log_path = make_log_with_a_write(tmp_path)
+    log_path.write_text(log_path.read_text().replace("plan.txt", "other.txt"))
+    assert main(["verify", str(log_path), "--sandbox", str(sandbox)]) == 1
+    out = capsys.readouterr().out
+    assert "FAILED" in out and "content check" not in out

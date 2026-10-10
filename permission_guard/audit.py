@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -25,11 +26,13 @@ except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
 from .models import AuditEntry
+from .tools import file_sha256
 
 GENESIS_HASH = "0" * 64
 COLUMNS = ("timestamp", "action", "target", "decision", "approver", "result", "reason")
 MAX_CELL_WIDTH = 72
 _TAIL_CHUNK = 64 * 1024
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AuditError(Exception):
@@ -48,6 +51,28 @@ class VerifyResult:
             return f"OK: {self.entries} entries, hash chain intact"
         where = f" (line {self.line})" if self.line else ""
         return f"FAILED{where}: {self.error}"
+
+
+@dataclass(frozen=True)
+class ContentMismatch:
+    target: str
+    recorded: str
+    actual: str  # hex digest, or a short reason such as "no longer exists"
+
+    def __str__(self) -> str:
+        if len(self.actual) == 64:
+            return f"{self.target}: differs from the last audited write (recorded {self.recorded[:12]}..., now {self.actual[:12]}...)"
+        return f"{self.target}: {self.actual} (recorded {self.recorded[:12]}...)"
+
+
+@dataclass(frozen=True)
+class ContentCheck:
+    checked: int
+    mismatches: list[ContentMismatch]
+
+    @property
+    def ok(self) -> bool:
+        return not self.mismatches
 
 
 def _payload(entry: AuditEntry) -> dict[str, Any]:
@@ -175,9 +200,44 @@ class AuditLog:
                     return VerifyResult(False, count, "chain broken: an entry was removed, inserted or reordered", lineno)
                 if compute_hash(prev_hash, entry) != entry.hash:
                     return VerifyResult(False, count, "entry was modified after it was written", lineno)
+                if entry.content_sha256 and not (entry.action == "write_file" and _SHA256_RE.match(entry.content_sha256)):
+                    return VerifyResult(
+                        False, count, "invalid content_sha256 (must be 64 hex digits, on write_file entries only)", lineno
+                    )
                 prev_hash = entry.hash
                 count += 1
         return VerifyResult(ok=True, entries=count)
+
+    def verify_contents(self, sandbox_root: str | Path) -> ContentCheck:
+        """Compare the recorded content hashes with the files as they are now.
+
+        For every file whose last audited event was a successful ``write_file``, hash the file in
+        the sandbox and compare. A file removed by an audited ``delete_file`` is not checked.
+        A mismatch is not proof of tampering (an approved command may have changed the file, and
+        commands are not hashed), but it is a change that did not go through the audited write
+        path, which is worth a look.
+        """
+        root = Path(sandbox_root)
+        expected: dict[str, str] = {}
+        for entry in self.read_all():
+            if entry.result != "ok":
+                continue
+            if entry.action == "write_file" and entry.content_sha256:
+                expected[entry.target] = entry.content_sha256
+            elif entry.action == "delete_file":
+                expected.pop(entry.target, None)
+
+        mismatches: list[ContentMismatch] = []
+        for target, recorded in expected.items():
+            try:
+                actual = file_sha256(root, target)
+            except FileNotFoundError:
+                actual = "no longer exists"
+            except Exception as exc:
+                actual = f"cannot be read ({type(exc).__name__})"
+            if actual != recorded:
+                mismatches.append(ContentMismatch(target, recorded, actual))
+        return ContentCheck(checked=len(expected), mismatches=mismatches)
 
     def format_table(self) -> str:
         """Render the log as a readable fixed-width table."""

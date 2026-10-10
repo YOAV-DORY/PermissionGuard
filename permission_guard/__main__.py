@@ -3,6 +3,7 @@
     python -m permission_guard check "rm -rf /"           what would the policy say? (nothing is executed)
     python -m permission_guard check --action read_file ../../etc/passwd
     python -m permission_guard verify audit.log.jsonl      has the audit log been tampered with?
+    python -m permission_guard verify audit.log.jsonl --sandbox ./sandbox   ... and do written files still match?
 """
 
 from __future__ import annotations
@@ -25,7 +26,20 @@ def cmd_verify(args: argparse.Namespace) -> int:
     print(result)
     if result.ok and result.entries:
         print(f"last hash: {log.last_hash()}")
-    return 0 if result.ok else 1
+    if not result.ok:
+        return 1
+
+    if args.sandbox is not None:
+        check = log.verify_contents(args.sandbox)
+        if check.ok:
+            print(f"content check: OK, {check.checked} audited write(s), every file matches its recorded SHA-256")
+        else:
+            print(f"content check: {len(check.mismatches)} of {check.checked} audited write(s) no longer match:")
+            for mismatch in check.mismatches:
+                print(f"  {mismatch}")
+            if args.strict:
+                return 1
+    return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -70,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
 
     verify = sub.add_parser("verify", help="check the hash chain of an audit log")
     verify.add_argument("logfile", nargs="?", default="audit.log.jsonl")
+    verify.add_argument(
+        "--sandbox", type=Path, help="also compare the recorded SHA-256 of every audited write_file with the file in this directory"
+    )
+    verify.add_argument("--strict", action="store_true", help="with --sandbox: exit 1 if any file no longer matches")
     verify.set_defaults(func=cmd_verify)
 
     check = sub.add_parser(

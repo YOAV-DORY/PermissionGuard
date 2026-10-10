@@ -267,3 +267,65 @@ def test_demo_sequence(make_guard, audit, sandbox: Path):
     assert decisions == [Decision.ALLOW, Decision.ALLOW, Decision.DENY]
     assert not (sandbox / "hello.txt").exists()
     assert [e.approver for e in audit.read_all()] == ["policy", "policy", "user", "user", "policy"]
+
+
+# ---------------------------------------------------------------- write_file content is hashed into the audit log
+
+
+def sha(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_write_file_rows_carry_the_sha256_of_the_content(make_guard, audit, sandbox: Path):
+    guard = make_guard(approver=AutoApprover(approve=True))
+    guard.handle("write_file", "plan.txt", content="secret plan\n")
+
+    entries = audit.read_all()
+    assert [e.result for e in entries] == ["authorized", "ok"]
+    assert {e.content_sha256 for e in entries} == {sha("secret plan\n")}
+    assert (sandbox / "plan.txt").read_text() == "secret plan\n"
+    assert "secret plan" not in audit.path.read_text(), "the hash is recorded, never the content"
+
+
+def test_content_hash_uses_utf8_bytes(make_guard, audit):
+    make_guard(approver=AutoApprover(approve=True)).handle("write_file", "u.txt", content="héllo wörld ✓")
+    assert audit.read_all()[0].content_sha256 == sha("héllo wörld ✓")
+
+
+def test_different_content_gives_a_different_hash(make_guard, audit):
+    guard = make_guard(approver=AutoApprover(approve=True))
+    guard.handle("write_file", "a.txt", content="one")
+    guard.handle("write_file", "a.txt", content="two")
+    hashes = [e.content_sha256 for e in audit.read_all() if e.result == "ok"]
+    assert hashes == [sha("one"), sha("two")]
+
+
+def test_declined_and_denied_writes_are_hashed_too(make_guard, audit):
+    make_guard(approver=AutoApprover(approve=False)).handle("write_file", "a.txt", content="declined")
+    make_guard().handle("write_file", "../outside.txt", content="traversal")
+    declined, traversal = audit.read_all()
+    assert (declined.result, declined.content_sha256) == ("blocked", sha("declined"))
+    assert (traversal.result, traversal.content_sha256) == ("blocked", sha("traversal"))
+
+
+def test_failed_writes_are_hashed_too(make_guard, audit, policy):
+    guard = make_guard(approver=AutoApprover(approve=True))
+    guard.handle("write_file", "sub", content="x")  # 'sub' is a directory: the tool fails after approval
+    entries = audit.read_all()
+    assert entries[-1].result.startswith("error:") and entries[-1].content_sha256 == sha("x")
+
+
+def test_other_actions_carry_no_content_hash(make_guard, audit):
+    guard = make_guard(approver=AutoApprover(approve=True))
+    guard.handle("read_file", "hello.txt")
+    guard.handle("delete_file", "hello.txt")
+    guard.handle("run_command", "rm -rf /")
+    assert all(e.content_sha256 == "" for e in audit.read_all())
+    assert "content_sha256" not in audit.path.read_text()
+
+
+def test_content_hash_is_recorded_through_the_mcp_style_params_path(make_guard, audit):
+    make_guard(approver=AutoApprover(approve=True)).handle("write_file", "m.txt", content="via handle")
+    assert audit.read_all()[0].content_sha256 == sha("via handle")

@@ -252,3 +252,135 @@ def test_cli_verify_ok_and_failure(log: AuditLog, capsys):
     write_lines(log.path, [json.dumps(row)])
     assert cli_main(["verify", str(log.path)]) == 1
     assert "FAILED" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- content_sha256
+
+
+GOOD_HASH = "a" * 64
+
+
+def test_content_hash_is_part_of_the_chain(log: AuditLog):
+    log.append(entry(action="write_file", content_sha256=GOOD_HASH))
+    rows = lines(log.path)
+    row = json.loads(rows[0])
+    row["content_sha256"] = "b" * 64  # swap in a different hash, leave the entry hash stale
+    write_lines(log.path, [json.dumps(row)])
+    result = log.verify()
+    assert not result.ok and "modified" in result.error
+
+
+def test_removing_the_content_hash_is_detected(log: AuditLog):
+    log.append(entry(action="write_file", content_sha256=GOOD_HASH))
+    row = json.loads(lines(log.path)[0])
+    del row["content_sha256"]
+    write_lines(log.path, [json.dumps(row)])
+    assert not log.verify().ok
+
+
+@pytest.mark.parametrize("bad", ["XYZ", "a" * 63, "A" * 64, "g" * 64, " " + "a" * 63])
+def test_malformed_content_hash_fails_verification_even_in_a_valid_chain(log: AuditLog, bad: str):
+    log.append(entry(action="write_file", content_sha256=bad))
+    result = log.verify()
+    assert not result.ok and "content_sha256" in result.error and result.line == 1
+
+
+def test_content_hash_on_a_non_write_entry_fails_verification(log: AuditLog):
+    log.append(entry(action="read_file", content_sha256=GOOD_HASH))
+    assert not log.verify().ok
+
+
+def test_entries_without_the_field_still_verify_old_logs(log: AuditLog):
+    """Logs written before the field existed must keep verifying (the field is omitted when empty)."""
+    first = log.append(entry(action="write_file", target="old.txt"))
+    log.append(entry(target="newer.txt"))
+    assert "content_sha256" not in lines(log.path)[0]
+    assert first.content_sha256 == "" and log.verify().ok
+
+
+def test_entry_to_dict_omits_an_empty_hash_and_keeps_a_set_one():
+    assert "content_sha256" not in entry().to_dict()
+    assert entry(action="write_file", content_sha256=GOOD_HASH).to_dict()["content_sha256"] == GOOD_HASH
+
+
+def test_hash_round_trips_through_the_file(log: AuditLog):
+    sealed = log.append(entry(action="write_file", content_sha256=GOOD_HASH))
+    assert log.read_all() == [sealed] and sealed.content_sha256 == GOOD_HASH
+
+
+# ---------------------------------------------------------------- verify_contents (compare with files on disk)
+
+
+def written(log: AuditLog, sandbox: Path, name: str, content: str, result: str = "ok") -> None:
+    import hashlib
+
+    (sandbox / name).write_text(content)
+    log.append(
+        entry(action="write_file", target=name, result=result, content_sha256=hashlib.sha256(content.encode()).hexdigest())
+    )
+
+
+def test_files_that_match_their_recorded_hash_pass(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "alpha")
+    written(log, sandbox, "b.txt", "beta")
+    check = log.verify_contents(sandbox)
+    assert check.ok and check.checked == 2
+
+
+def test_a_file_changed_after_the_audited_write_is_reported(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "alpha")
+    (sandbox / "a.txt").write_text("changed behind the guard's back")
+    check = log.verify_contents(sandbox)
+    assert not check.ok and [m.target for m in check.mismatches] == ["a.txt"]
+    assert "differs from the last audited write" in str(check.mismatches[0])
+
+
+def test_only_the_last_write_to_a_target_counts(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "first")
+    written(log, sandbox, "a.txt", "second")
+    assert log.verify_contents(sandbox).ok
+
+
+def test_an_audited_delete_clears_the_expectation(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "alpha")
+    (sandbox / "a.txt").unlink()
+    log.append(entry(action="delete_file", target="a.txt", result="ok"))
+    check = log.verify_contents(sandbox)
+    assert check.ok and check.checked == 0
+
+
+def test_a_file_removed_without_an_audited_delete_is_reported(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "alpha")
+    (sandbox / "a.txt").unlink()
+    check = log.verify_contents(sandbox)
+    assert str(check.mismatches[0]).startswith("a.txt: no longer exists")
+
+
+def test_writes_that_did_not_happen_are_not_expected_on_disk(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    log.append(entry(action="write_file", target="never.txt", result="blocked", content_sha256=GOOD_HASH))
+    log.append(entry(action="write_file", target="failed.txt", result="error: boom", content_sha256=GOOD_HASH))
+    assert log.verify_contents(sandbox).checked == 0
+
+
+def test_a_symlink_swapped_in_for_a_written_file_is_reported_not_followed(log: AuditLog, tmp_path: Path):
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+    written(log, sandbox, "a.txt", "alpha")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("alpha")  # same bytes: following the link would wrongly look fine
+    (sandbox / "a.txt").unlink()
+    (sandbox / "a.txt").symlink_to(outside)
+    check = log.verify_contents(sandbox)
+    assert not check.ok and "SandboxViolation" in str(check.mismatches[0])

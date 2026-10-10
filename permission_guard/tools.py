@@ -16,6 +16,7 @@ be exposed directly as an MCP tool.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import posixpath
 import selectors
@@ -153,6 +154,17 @@ def delete_file(sandbox_root: Path, target: str, *, limits: Limits | None = None
     finally:
         os.close(dirfd)
     return f"deleted {target}"
+
+
+def file_sha256(sandbox_root: Path, target: str) -> str:
+    """SHA-256 (hex) of a regular file inside the sandbox, opened without following symlinks."""
+    fd = _open_file(sandbox_root, target, os.O_RDONLY)
+    _require_regular(fd, target)
+    digest = hashlib.sha256()
+    with os.fdopen(fd, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # ---------------------------------------------------------------- command tool

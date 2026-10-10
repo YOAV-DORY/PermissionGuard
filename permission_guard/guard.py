@@ -15,6 +15,7 @@ Fail-closed rules enforced here:
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,23 @@ from .audit import AuditLog
 from .models import ActionRequest, AuditEntry, Decision, GuardResult, PolicyResult
 from .policy import PolicyEngine
 from .tools import TOOLS, ToolFn
+
+
+def content_digest(request: ActionRequest) -> str:
+    """SHA-256 of the content a write_file request carries ("" for every other action).
+
+    Recorded on every write_file row, denied ones included, so the log shows exactly which
+    bytes were asked for without storing the content itself.
+    """
+    if request.action != "write_file":
+        return ""
+    content = request.params.get("content", "")
+    if not isinstance(content, str):
+        return ""
+    try:
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    except UnicodeEncodeError:  # lone surrogates: the policy refuses these, there are no bytes to hash
+        return ""
 
 
 class PermissionGuard:
@@ -116,6 +134,7 @@ class PermissionGuard:
                     reason=reason,
                     approver=approver,
                     result=result,
+                    content_sha256=content_digest(request),
                 )
             )
         except Exception as exc:

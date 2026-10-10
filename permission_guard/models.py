@@ -59,7 +59,7 @@ class AuditEntry:
     """One line in the audit log.
 
     ``prev_hash`` and ``hash`` form a hash chain filled in by ``AuditLog.append``;
-    callers leave them empty.
+    callers leave them empty. ``content_sha256`` is covered by that chain.
     """
 
     timestamp: str
@@ -71,13 +71,17 @@ class AuditEntry:
     result: str = ""
     prev_hash: str = ""
     hash: str = ""
+    content_sha256: str = ""  # write_file only: SHA-256 (hex) of the UTF-8 content that was requested
 
     @staticmethod
     def now() -> str:
         return datetime.now(UTC).isoformat(timespec="seconds")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if not data["content_sha256"]:
+            del data["content_sha256"]  # absent on every non-write entry, and on logs written before the field existed
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AuditEntry:
