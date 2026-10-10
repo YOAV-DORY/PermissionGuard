@@ -82,3 +82,34 @@ def test_social_preview_has_github_dimensions():
 def test_security_policy_exists_and_points_at_the_threat_model():
     text = (PROJECT_ROOT / "SECURITY.md").read_text()
     assert "THREAT_MODEL.md" in text and "vulnerability" in text.lower()
+
+
+# ---------------------------------------------------------------- packaging
+
+
+def test_default_policy_lives_inside_the_package_and_loads(tmp_path: Path):
+    from permission_guard import PolicyEngine, default_policy_path
+
+    path = default_policy_path()
+    assert path.is_file() and path.parent.parent.name == "permission_guard"
+    assert PolicyEngine.from_yaml(path, sandbox_root=tmp_path).limits.max_read_bytes > 0
+
+
+def test_package_data_config_ships_the_policy_in_the_wheel():
+    import tomllib
+
+    config = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+    package_data = config["tool"]["setuptools"]["package-data"]["permission_guard"]
+    assert "policies/*.yaml" in package_data
+    assert config["tool"]["setuptools"]["packages"] == ["permission_guard"]
+
+
+def test_there_is_no_second_copy_of_the_policy_outside_the_package():
+    assert not (PROJECT_ROOT / "policies").exists(), "single source of truth: permission_guard/policies/default.yaml"
+
+
+def test_packaged_policy_refuses_an_implicit_sandbox():
+    from permission_guard import PolicyConfigError, PolicyEngine, default_policy_path
+
+    with pytest.raises(PolicyConfigError, match="explicit sandbox_root"):
+        PolicyEngine.from_yaml(default_policy_path())

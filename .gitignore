@@ -5,3 +5,8 @@ __pycache__/
 audit.log.jsonl
 sandbox/*
 !sandbox/.gitkeep
+build/
+dist/
+*.egg-info/
+.DS_Store
+.ruff_cache/

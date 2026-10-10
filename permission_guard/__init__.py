@@ -11,7 +11,7 @@ from .approval import AutoApprover, CliApprover
 from .audit import AuditError, AuditLog, VerifyResult
 from .guard import PermissionGuard
 from .models import ActionRequest, AuditEntry, Decision, GuardResult, Limits, PolicyResult
-from .policy import PolicyConfigError, PolicyEngine
+from .policy import PolicyConfigError, PolicyEngine, default_policy_path
 
 __all__ = [
     "ActionRequest",
@@ -28,4 +28,5 @@ __all__ = [
     "PolicyEngine",
     "PolicyResult",
     "VerifyResult",
+    "default_policy_path",
 ]

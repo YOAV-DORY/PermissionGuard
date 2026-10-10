@@ -14,9 +14,8 @@ from pathlib import Path
 
 from .audit import AuditLog
 from .models import ActionRequest, Decision
-from .policy import PolicyConfigError, PolicyEngine
+from .policy import PolicyConfigError, PolicyEngine, default_policy_path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ACTIONS = ("run_command", "read_file", "write_file", "delete_file")
 
 
@@ -81,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("target", help="the command line, or a sandbox-relative path with --action")
     check.add_argument("--action", choices=ACTIONS, default="run_command")
     check.add_argument("--content", default="", help="file content, for --action write_file")
-    check.add_argument("--policy", type=Path, default=PROJECT_ROOT / "policies" / "default.yaml")
-    check.add_argument("--sandbox", type=Path, default=PROJECT_ROOT / "sandbox")
+    check.add_argument("--policy", type=Path, default=default_policy_path(), help="policy file (default: the packaged default)")
+    check.add_argument("--sandbox", type=Path, default=Path("sandbox"), help="sandbox directory (default: ./sandbox)")
     check.add_argument("--json", action="store_true", help="machine-readable output")
     check.set_defaults(func=cmd_check)
 

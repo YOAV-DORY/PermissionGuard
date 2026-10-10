@@ -53,11 +53,9 @@ from .assistant import execute_tool_call
 from .audit import AuditLog
 from .guard import PermissionGuard
 from .models import ActionRequest, Decision
-from .policy import PolicyEngine
+from .policy import PolicyEngine, default_policy_path
 
 logger = logging.getLogger("permission_guard.mcp")
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 APPROVE_ONCE = "approve once"
 APPROVE_SESSION = "approve for this session"
@@ -263,9 +261,13 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m permission_guard.mcp_server",
         description="Run PermissionGuard as an MCP server on stdio.",
     )
-    parser.add_argument("--policy", type=Path, default=PROJECT_ROOT / "policies" / "default.yaml")
-    parser.add_argument("--sandbox", type=Path, default=PROJECT_ROOT / "sandbox", help="the only directory the tools may touch")
-    parser.add_argument("--audit-file", type=Path, default=PROJECT_ROOT / "audit.log.jsonl")
+    parser.add_argument("--policy", type=Path, default=default_policy_path(), help="policy file (default: the packaged default)")
+    parser.add_argument("--sandbox", type=Path, required=True, help="the only directory the tools may touch (use an absolute path)")
+    parser.add_argument(
+        "--audit-file",
+        type=Path,
+        help="audit log path (default: audit.log.jsonl next to the sandbox directory; use an absolute path)",
+    )
     parser.add_argument(
         "--approval",
         choices=["elicit", "deny"],
@@ -275,13 +277,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(name)s: %(message)s")
+    sandbox = args.sandbox.resolve()
+    audit_file = (args.audit_file or sandbox.parent / "audit.log.jsonl").resolve()
     try:
-        server = build_default_server(args.policy.resolve(), args.sandbox.resolve(), args.audit_file.resolve(), args.approval)
+        server = build_default_server(args.policy.resolve(), sandbox, audit_file, args.approval)
     except Exception as exc:
         print(f"permission-guard: cannot start: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
-    logger.info("policy=%s sandbox=%s audit=%s approval=%s", args.policy, args.sandbox.resolve(), args.audit_file, args.approval)
+    logger.info("policy=%s sandbox=%s audit=%s approval=%s", args.policy, sandbox, audit_file, args.approval)
     server.run("stdio")
     return 0
 

@@ -1,4 +1,4 @@
-"""One test per policy rule in policies/default.yaml."""
+"""One test per policy rule in the packaged default policy (permission_guard/policies/default.yaml)."""
 
 from __future__ import annotations
 

@@ -38,6 +38,11 @@ COMMAND_KEYS = {
 PREVIEW_CHARS = 200
 
 
+def default_policy_path() -> Path:
+    """The default policy, shipped inside the package (works from a checkout and from an installed wheel)."""
+    return Path(__file__).resolve().parent / "policies" / "default.yaml"
+
+
 class PolicyConfigError(ValueError):
     """The policy file is malformed. The engine refuses to start with it."""
 
@@ -158,6 +163,11 @@ class PolicyEngine:
         if config is None:
             raise PolicyConfigError(f"{path}: policy file is empty")
         validate_config(config)
+        if sandbox_root is None and path.resolve() == default_policy_path().resolve():
+            raise PolicyConfigError(
+                "the packaged default policy needs an explicit sandbox_root: its relative './sandbox' "
+                "would point into the installed package"
+            )
         if sandbox_root is None:
             # A relative sandbox_root in the file is relative to the project (the policy dir's parent).
             sandbox_root = path.parent.parent / config.get("sandbox_root", "./sandbox")

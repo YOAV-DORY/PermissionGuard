@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from permission_guard import AuditLog, AutoApprover, PermissionGuard, PolicyEngine
+from permission_guard import AuditLog, AutoApprover, PermissionGuard, PolicyEngine, default_policy_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_POLICY = PROJECT_ROOT / "policies" / "default.yaml"
+DEFAULT_POLICY = default_policy_path()
 
 
 @pytest.fixture

@@ -55,3 +55,27 @@ jobs:
 
       - name: Lint
         run: ruff check .
+
+  package:
+    name: wheel (clean venv)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the wheel
+        run: python -m pip wheel . --no-deps -w dist
+
+      - name: Install into a clean venv and run from an unrelated directory
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/pip" install dist/permission_guard-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/clean/bin/python" -m permission_guard check 'ls -la' | tee check-ask.txt
+          grep -q '^ASK' check-ask.txt
+          if "$RUNNER_TEMP/clean/bin/python" -m permission_guard check 'rm -rf /'; then
+            echo "expected the dangerous command to be denied"; exit 1
+          fi

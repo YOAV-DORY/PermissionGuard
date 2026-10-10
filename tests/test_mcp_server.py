@@ -297,3 +297,22 @@ def test_stdio_server_refuses_to_start_with_a_bad_policy(tmp_path: Path):
     assert proc.returncode == 2
     assert "cannot start" in proc.stderr and "unknown top-level keys" in proc.stderr
     assert proc.stdout == "", "nothing may be written to stdout: it is the protocol channel"
+
+
+def test_stdio_server_requires_an_explicit_sandbox():
+    proc = subprocess.run(
+        [sys.executable, "-m", "permission_guard.mcp_server"], capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=60
+    )
+    assert proc.returncode == 2 and "--sandbox" in proc.stderr and proc.stdout == ""
+
+
+def test_audit_log_defaults_to_next_to_the_sandbox(env):
+    async def main():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "permission_guard.mcp_server", "--sandbox", str(env["sandbox"])], cwd=str(PROJECT_ROOT)
+        )
+        async with Client(params, mode="legacy") as c:
+            await c.call_tool("read_file", {"path": "hello.txt"})
+
+    asyncio.run(main())
+    assert AuditLog(env["sandbox"].parent / "audit.log.jsonl").verify().entries == 2

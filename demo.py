@@ -26,10 +26,11 @@ from permission_guard import (
     CliApprover,
     PermissionGuard,
     PolicyEngine,
+    default_policy_path,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-POLICY_FILE = PROJECT_ROOT / "policies" / "default.yaml"
+POLICY_FILE = default_policy_path()
 SANDBOX = PROJECT_ROOT / "sandbox"
 AUDIT_FILE = PROJECT_ROOT / "audit.log.jsonl"
 SAMPLE_FILE = "notes.txt"

@@ -20,11 +20,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from permission_guard import AuditLog, AutoApprover, CliApprover, PermissionGuard, PolicyEngine
+from permission_guard import AuditLog, AutoApprover, CliApprover, PermissionGuard, PolicyEngine, default_policy_path
 from permission_guard.assistant import AgentEvent, describe_call, run_agent
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-POLICY_FILE = PROJECT_ROOT / "policies" / "default.yaml"
+POLICY_FILE = default_policy_path()
 REPORT_NAME = "report.txt"
 USER_PROMPT = f"Please summarize {REPORT_NAME} in two sentences."
 
