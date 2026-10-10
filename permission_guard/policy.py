@@ -17,6 +17,7 @@ import yaml
 
 from .commands import CommandPolicy
 from .models import ActionRequest, Decision, Limits, PolicyResult
+from .paths import first_symlink
 
 PATH_ACTIONS = ("read_file", "write_file", "delete_file")
 COMMAND_ACTION = "run_command"
@@ -200,7 +201,7 @@ class PolicyEngine:
         if not resolved.is_relative_to(self.sandbox_root):
             return outside
 
-        link = self._first_symlink(norm)
+        link = first_symlink(self.sandbox_root, norm)
         if link:
             return PolicyResult(Decision.DENY, f"symlinks are not allowed in paths: {link}", "symlink-in-path")
 
@@ -228,14 +229,3 @@ class PolicyEngine:
             f"{request.action}-inside-sandbox",
             details,
         )
-
-    def _first_symlink(self, norm: str) -> str | None:
-        """Name of the first path component (under the sandbox) that is a symlink, if any."""
-        current = self.sandbox_root
-        for part in norm.split("/"):
-            current = current / part
-            if current.is_symlink():
-                return part
-            if not current.exists():
-                break  # components that do not exist yet cannot be symlinks
-        return None
