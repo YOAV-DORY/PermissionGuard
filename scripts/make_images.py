@@ -38,32 +38,72 @@ CARD_HTML = """<!doctype html><meta charset="utf-8">
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 1280px; height: 640px; }
   body {
-    background: radial-gradient(1200px 600px at 85% 20%, #1b2a41 0%, #0d1117 60%);
-    color: #f0f6fc; font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-    display: flex; align-items: center; padding: 0 56px; gap: 40px; overflow: hidden;
+    position: relative; overflow: hidden; color: #f0f6fc;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: radial-gradient(900px 560px at 72% 48%, #1a2433 0%, #0d1117 68%);
   }
-  .left { width: 470px; flex: none; }
-  h1 { font-size: 58px; line-height: 1.05; margin: 0 0 14px; letter-spacing: -1px; }
-  .tag { font-size: 25px; color: #9fb3c8; margin: 0 0 34px; line-height: 1.3; }
-  ul { list-style: none; padding: 0; margin: 0; font-size: 21px; line-height: 1.35; }
-  li { margin: 0 0 14px; padding-left: 30px; position: relative; color: #dbe5ee; }
-  li::before { content: ""; position: absolute; left: 0; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: #3fb950; }
-  li.r::before { background: #f85149; } li.y::before { background: #d29922; }
-  .foot { position: absolute; left: 56px; bottom: 34px; font-size: 18px; color: #6e7681; }
-  .term { flex: none; width: 700px; filter: drop-shadow(0 18px 40px rgba(0,0,0,.55)); }
-  .term img { width: 700px; display: block; }
+  .left { position: absolute; left: 64px; top: 0; bottom: 0; width: 500px; display: flex; flex-direction: column; justify-content: center; }
+  h1 { font-size: 58px; line-height: 1.02; margin: 0 0 18px; letter-spacing: -1.2px; }
+  .tag { font-size: 28px; color: #9fb3c8; margin: 0 0 30px; line-height: 1.3; }
+  .sub { font-size: 21px; color: #6e7f91; line-height: 1.45; margin: 0; max-width: 440px; }
+  .foot { position: absolute; left: 64px; bottom: 38px; font-size: 19px; color: #6e7681; }
+
+  /* traffic light */
+  .pole { position: absolute; left: 636px; top: 520px; width: 28px; height: 140px; background: linear-gradient(90deg, #1b2230, #2a3446 45%, #1b2230); border-radius: 4px; }
+  .housing {
+    position: absolute; left: 596px; top: 56px; width: 108px; height: 480px; border-radius: 34px;
+    background: linear-gradient(160deg, #222c3c, #131a26); border: 3px solid #2f3b50;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55), inset 0 2px 0 rgba(255,255,255,.06);
+  }
+  .lamp { position: absolute; left: 14px; width: 74px; height: 74px; border-radius: 50%; }
+  .lamp::after { content: ""; position: absolute; left: 14px; top: 9px; width: 26px; height: 15px; border-radius: 50%; background: rgba(255,255,255,.35); transform: rotate(-25deg); }
+  .l-red    { top: 28px;  background: radial-gradient(circle at 50% 40%, #ff7b72, #f85149 60%, #c4302b); box-shadow: 0 0 34px 8px rgba(248,81,73,.55); }
+  .l-yellow { top: 202px; background: radial-gradient(circle at 50% 40%, #f2cc60, #d29922 60%, #a67618); box-shadow: 0 0 34px 8px rgba(210,153,34,.5); }
+  .l-green  { top: 376px; background: radial-gradient(circle at 50% 40%, #56d364, #3fb950 60%, #2a8a3c); box-shadow: 0 0 34px 8px rgba(63,185,80,.5); }
+
+  .row { position: absolute; left: 748px; width: 486px; height: 150px; display: flex; flex-direction: column; justify-content: center; }
+  .r1 { top: 76px; } .r2 { top: 250px; } .r3 { top: 424px; }
+  .verdict { font-size: 15px; font-weight: 800; letter-spacing: 3px; margin: 0 0 5px; }
+  .what { font-size: 25px; font-weight: 700; margin: 0 0 12px; }
+  .red .verdict { color: #ff7b72; } .yellow .verdict { color: #f2cc60; } .green .verdict { color: #56d364; }
+  .pills { display: flex; flex-wrap: wrap; gap: 7px; }
+  .pills span {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 16px;
+    padding: 5px 10px; border-radius: 8px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: #dbe5ee;
+  }
+  .red .pills span { border-color: rgba(248,81,73,.45); } .yellow .pills span { border-color: rgba(210,153,34,.45); } .green .pills span { border-color: rgba(63,185,80,.45); }
 </style>
+
 <div class="left">
   <h1>PermissionGuard</h1>
   <p class="tag">A permission layer for AI assistants</p>
-  <ul>
-    <li>allow, deny, or ask a human for every action</li>
-    <li class="r">limits what a prompt-injected assistant can do</li>
-    <li class="y">tamper-evident audit log, MCP server</li>
-  </ul>
+  <p class="sub">Every action an AI takes is allowed, sent to a human, or denied. All of it goes into a tamper-evident log.</p>
 </div>
-<div class="term"><img src="__SVG__"></div>
-<div class="foot">github.com/YOAV-DORY/PermissionGuard &nbsp;·&nbsp; Python 3.11 &nbsp;·&nbsp; MIT</div>
+
+<div class="pole"></div>
+<div class="housing">
+  <div class="lamp l-red"></div>
+  <div class="lamp l-yellow"></div>
+  <div class="lamp l-green"></div>
+</div>
+
+<div class="row r1 red">
+  <p class="verdict">DENY</p>
+  <p class="what">Blocked by policy</p>
+  <div class="pills"><span>rm -rf /</span><span>curl ... | sh</span><span>../../.ssh/id_rsa</span></div>
+</div>
+<div class="row r2 yellow">
+  <p class="verdict">ASK</p>
+  <p class="what">A human decides</p>
+  <div class="pills"><span>delete_file</span><span>write_file</span><span>run_command</span></div>
+</div>
+<div class="row r3 green">
+  <p class="verdict">ALLOW</p>
+  <p class="what">Safe and in the sandbox</p>
+  <div class="pills"><span>read_file report.txt</span></div>
+</div>
+
+<div class="foot">github.com/YOAV-DORY/PermissionGuard &nbsp;·&nbsp; Python 3.11</div>
 """
 
 
@@ -116,7 +156,7 @@ def main() -> int:
             screenshot(chrome, page, OUT / f"{name}.png", width, height, scale=2, transparent=True)
 
         card = tmp / "card.html"
-        card.write_text(CARD_HTML.replace("__SVG__", svgs["injection"].as_uri()), encoding="utf-8")
+        card.write_text(CARD_HTML, encoding="utf-8")
         screenshot(chrome, card, OUT / "social-preview.png", 1280, 640, scale=1)
 
     for png in sorted(OUT.glob("*.png")):
