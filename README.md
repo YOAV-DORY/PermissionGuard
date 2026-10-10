@@ -59,7 +59,7 @@ guard stopping it. (Python 3.11 required; macOS and Linux.)
 
 The exit code is 1 on deny. If you find a command that gets through when it should not, that is a
 bug: see [SECURITY.md](SECURITY.md). Attacks that are known to work are listed in
-[THREAT_MODEL.md](THREAT_MODEL.md) and pinned as `xfail` tests.
+[THREAT_MODEL.md](THREAT_MODEL.md) and pinned as strict `xfail` tests.
 
 ## Architecture
 
@@ -199,6 +199,12 @@ Verify an audit log has not been edited:
 .venv/bin/python -m permission_guard verify audit.log.jsonl
 ```
 
+Also compare the recorded SHA-256 of every audited write with the files in the sandbox:
+
+```bash
+.venv/bin/python -m permission_guard verify audit.log.jsonl --sandbox ./sandbox
+```
+
 ## Default policy
 
 Defined in [`permission_guard/policies/default.yaml`](permission_guard/policies/default.yaml). The policy **fails closed**:
@@ -215,8 +221,9 @@ to load.
 | `run_command` | dangerous: recursive `rm`, `sudo`/`su`, `curl ... \| sh`, writes to system paths, shells, wrappers (`env`, `xargs`, ...), `dd`/`mkfs`, `chmod`, `ln` | deny |
 | `run_command` | needs a shell: `\|`, `;`, `&&`, `>`, `$(...)`, backticks, newlines | deny |
 | `run_command` | program not on the allowlist | deny (set `unknown_program: ask` to ask instead) |
-| `run_command` | allowlisted program whose arguments stay inside the sandbox | ask |
-| `run_command` | a path-like argument outside the sandbox, or a non-http(s) URL | deny |
+| `run_command` | allowlisted program whose arguments all stay inside the sandbox | ask |
+| `run_command` | any argument (bare names included) that escapes the sandbox, is absolute, starts with `~`, or passes through a symlink; a non-http(s) URL | deny |
+| `run_command` | `curl`/`wget` `@file` references that point outside the sandbox or through a symlink; options that follow symlinks (`grep -R`, `cp -L`, `diff -r`) | deny |
 | unknown action | - | deny |
 
 Note on "every other command requires approval": the first version asked for every command
@@ -458,14 +465,26 @@ so `|`, `;` and `>` would be passed to the program as literal arguments, which w
 silently different from what the assistant meant. The policy rejects them up front with a
 clear reason so the assistant can retry with one simple command.
 
-**Path arguments are policed too.** `cat /etc/passwd` and `cp x ../../y` fail on the
-argument, not on the program name. This also covers `--opt=/path`, glued `-o/path`, and
-URL schemes (`file://` is denied).
+**Path arguments are policed too, and every argument is treated as a possible path.**
+`cat /etc/passwd`, `cp x ../../y` and `cat link` (where `link` is a symlink to a file outside
+the sandbox) all fail on the argument, not on the program name. The guard cannot tell a file name
+from a word (`cat link` against `echo link`), and guessing wrong means reading or overwriting a
+file outside the sandbox, so *every* argument, `--opt=value` value and glued `-o/path` value is
+resolved against the sandbox exactly as the kernel would, and refused if it escapes or passes
+through any symlink. Flags and plain words that do not name an existing file simply pass. The
+cost is a false positive by design: a plain word equal to the name of a symlink in the sandbox
+(`echo link`) is refused. URLs (http/https) are the only values that are not paths, and
+`curl`/`wget` `@file` references are parsed and checked like any other path. This hole existed
+until a security review found it; it is now covered by regression tests that fail on the old code.
 
-**Symlinks are refused rather than followed.** The policy rejects any symlink in a path
-and the tools open each component with `O_NOFOLLOW` relative to a directory descriptor, so
-a symlink swapped in after the policy check (a TOCTOU race) makes the open fail instead
-of escaping. Tradeoff: legitimate symlinks inside the sandbox do not work.
+**Symlinks are refused rather than followed, and the guarantee differs per tool.** The policy
+rejects any symlink in a path. The file tools (`read_file`, `write_file`, `delete_file`) open each
+component with `O_NOFOLLOW` relative to a directory descriptor, so a symlink swapped in after the
+policy check (a TOCTOU race) makes the open fail instead of escaping. `run_command` cannot get that
+guarantee, because a real program opens the path: its arguments are checked before the exec, and a
+symlink swapped in between the check and the exec is not caught (limitation 12 in the threat model,
+pinned by a strict `xfail` test). Programs that follow symlinks on their own (`grep -R`, `cp -L`,
+`diff -r`) are denied. Tradeoff: legitimate symlinks inside the sandbox do not work.
 
 **Fail closed.** Bad policy file, policy exception, approver exception, closed stdin,
 audit write failure, unregistered tool: all of them end in "denied" or "not executed".
@@ -475,15 +494,17 @@ happen without a record. Tradeoff: two rows per executed action, and a full disk
 the guard.
 
 **Hash-chained JSONL.** Each entry carries the hash of the previous one, so editing,
-deleting, inserting or reordering lines is detected by `verify`. It is tamper evidence,
+deleting, inserting or reordering lines is detected by `verify`. Every `write_file` row also
+carries the SHA-256 of the content that was requested (never the content itself), covered by the
+same chain; `verify --sandbox DIR` compares those hashes with the files on disk. It is tamper evidence,
 not tamper proof: someone who can rewrite the whole file can recompute the chain, and
 dropped tail entries are only visible if you saved `last_hash()` elsewhere. Details in
 [THREAT_MODEL.md](THREAT_MODEL.md).
 
 **Approval shows what you are approving.** Resolved absolute path, parsed argv, and a
 content preview for writes, so "yes" is informed. `ask` is resolved by an injectable
-`ApprovalProvider`: `CliApprover` for terminals, `AutoApprover` for tests, and later an
-MCP-based approver, without changing the guard.
+`ApprovalProvider`: `CliApprover` for terminals, `AutoApprover` for tests, and an MCP
+elicitation approver, without changing the guard.
 
 **Session grants are keyed by `(action, target)`.** "Approve for this session" covers
 only the identical request. Broader grants widen the blast radius, so v1 keeps it narrow.
@@ -493,8 +514,9 @@ program lists, limits, reasons); the order of checks is fixed in code. Unknown k
 errors, so a typo cannot silently weaken the policy.
 
 **Honest limits.** Allowed interpreters can still run arbitrary scripts after approval,
-network programs can exfiltrate, and this is a policy-level sandbox, not an OS jail.
-These are listed, each with an `xfail` test, in [THREAT_MODEL.md](THREAT_MODEL.md).
+network programs can exfiltrate, command arguments are checked before the exec rather than at it,
+and this is a policy-level sandbox, not an OS jail. The attacks among these are listed in
+[THREAT_MODEL.md](THREAT_MODEL.md), each pinned by a strict `xfail` test.
 
 **One guard, three front ends.** The scripted demo, the LLM loop and the MCP server all call
 `guard.handle()`; none of them contains policy logic. Approval is a pluggable protocol, which is

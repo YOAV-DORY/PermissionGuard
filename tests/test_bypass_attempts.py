@@ -328,6 +328,29 @@ def policy_for(tmp_path: Path) -> PolicyEngine:
     return PolicyEngine.from_yaml(DEFAULT_POLICY, sandbox_root=sandbox)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="command arguments are checked before the program runs, not when it opens the file: a symlink swapped in "
+    "between the policy check (or the human's approval) and the exec is not caught. The file tools do not have this "
+    "race (O_NOFOLLOW); a real program opening a path cannot be made to.",
+)
+def test_known_limit_command_arguments_are_checked_before_exec_not_at_exec(arena, monkeypatch):
+    sandbox: Path = arena["sandbox"]
+    (sandbox / "report.txt").write_text("harmless report")
+    guard: PermissionGuard = arena["guard"]
+    real_evaluate = guard.policy.evaluate
+
+    def evaluate_then_swap(request):
+        verdict = real_evaluate(request)  # the policy sees an ordinary file ...
+        (sandbox / "report.txt").unlink()
+        (sandbox / "report.txt").symlink_to(arena["canary"])  # ... and it becomes a link before cat runs
+        return verdict
+
+    monkeypatch.setattr(guard.policy, "evaluate", evaluate_then_swap)
+    result = guard.handle("run_command", "cat report.txt")
+    assert "must survive" not in result.output
+
+
 @pytest.mark.xfail(strict=True, reason="allowed interpreters run arbitrary code from files; only the human prompt stands in the way")
 def test_known_limit_script_content_is_not_inspected(tmp_path: Path):
     policy = policy_for(tmp_path)
