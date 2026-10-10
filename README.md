@@ -24,8 +24,9 @@ Every requested action (read a file, write a file, delete a file, run a command)
 checked against a policy, escalated to a human when the policy says so, executed only
 if permitted, and recorded in the audit log.
 
-The AI assistant is simulated in this version. The design is intentionally shaped so the
-guard can later be exposed as an [MCP](https://modelcontextprotocol.io/) server.
+Three front ends share the same guard: `demo.py` (a scripted assistant), `demo_injection.py`
+(a tool-use loop with a simulated or real Claude assistant) and `permission_guard.mcp_server`,
+which exposes the guard to any [MCP](https://modelcontextprotocol.io/) client.
 
 > Security posture and its honest limits are written down in [THREAT_MODEL.md](THREAT_MODEL.md).
 > The test suite includes a red-team file that attacks the guard, and lists the attacks
@@ -75,8 +76,8 @@ bug: see [SECURITY.md](SECURITY.md). Attacks that are known to work are listed i
         |                |   |  .py    |   ask    -> 2. approval       |      |   limits)       |
         |                |   +---------+              |                |      +-----------------+
         |                |    commands.py             v                |
-        |                |    policies/        +-------------+         |      +-----------------+
-        |                |    default.yaml     | approval.py | <-------|------|  human (CLI)    |
+        |                |    packaged         +-------------+         |      +-----------------+
+        |                |    policy.yaml      | approval.py | <-------|------|  human (CLI)    |
         |                |                     +-------------+         |      +-----------------+
         |                |                                             |
         |                |   decision is written BEFORE the tool runs  |      +-----------------+
@@ -112,8 +113,9 @@ permission_guard/
   llm.py         AnthropicLLM: adapter for the official Anthropic SDK (optional dependency)
   simulated.py   GullibleLLM: offline stand-in for a model that obeys injected instructions
   mcp_server.py  the guard as an MCP server (stdio); approval through MCP elicitation
-  __main__.py    `python -m permission_guard verify` for audit logs
-policies/default.yaml   the default policy
+  paths.py       path inspection for command arguments (escapes, symlinks)
+  policies/      default.yaml, the default policy (package data: it ships inside the wheel)
+  __main__.py    `python -m permission_guard check` (dry run) and `verify` (audit logs)
 demo.py                 end-to-end demonstration with a scripted assistant
 demo_injection.py       prompt-injection demo: simulated or real Claude (--live)
 requirements-llm.txt    core + the optional Anthropic SDK
@@ -199,7 +201,7 @@ Verify an audit log has not been edited:
 
 ## Default policy
 
-Defined in [`policies/default.yaml`](policies/default.yaml). The policy **fails closed**:
+Defined in [`permission_guard/policies/default.yaml`](permission_guard/policies/default.yaml). The policy **fails closed**:
 anything it does not mention is denied, and a policy file with a typo or bad value refuses
 to load.
 
@@ -346,12 +348,17 @@ server over stdio. A client gets four tools (`read_file`, `write_file`, `delete_
 `run_command`); every call goes through the same policy, approval flow and audit log as the
 rest of this project.
 
+Install the package into the virtual environment (an editable install, with the MCP extra).
+This step is required: the client starts the server from its *own* working directory, not from
+this repository, so without an install `python -m permission_guard.mcp_server` fails with
+`ModuleNotFoundError`.
+
 ```bash
-.venv/bin/pip install -r requirements-mcp.txt
+.venv/bin/pip install -e ".[mcp]"
 ```
 
-Register it with a client. For Claude Code (use absolute paths; the client starts the
-server from its own working directory):
+Register it with a client. For Claude Code (use absolute paths everywhere: the client's working
+directory is not this repository):
 
 ```bash
 claude mcp add permission-guard -- /ABSOLUTE/PATH/.venv/bin/python -m permission_guard.mcp_server --sandbox /ABSOLUTE/PATH/sandbox --audit-file /ABSOLUTE/PATH/audit.log.jsonl
@@ -370,7 +377,14 @@ For clients configured with JSON:
 }
 ```
 
-Options: `--policy FILE`, `--sandbox DIR`, `--audit-file FILE`, and `--approval elicit|deny`.
+Options:
+
+- `--sandbox DIR` is required; use an absolute path. It is the only directory the tools may touch.
+- `--audit-file FILE` defaults to `audit.log.jsonl` next to the sandbox directory; use an absolute path
+  if you want it somewhere else.
+- `--policy FILE` defaults to the policy packaged with the library; pass an absolute path to use your
+  own (a copy of [`default.yaml`](permission_guard/policies/default.yaml) is a good start).
+- `--approval elicit|deny`, see below.
 
 **Approval happens in the client.** A stdio server has no terminal (stdin and stdout carry the
 protocol), so when the policy says `ask`, the server uses MCP *elicitation*: the client shows
@@ -415,10 +429,10 @@ subprocess.
 ## Using the guard from code
 
 ```python
-from permission_guard import AuditLog, CliApprover, PermissionGuard, PolicyEngine
+from permission_guard import AuditLog, CliApprover, PermissionGuard, PolicyEngine, default_policy_path
 
 guard = PermissionGuard(
-    policy=PolicyEngine.from_yaml("policies/default.yaml"),
+    policy=PolicyEngine.from_yaml(default_policy_path(), sandbox_root="sandbox"),
     audit=AuditLog("audit.log.jsonl"),
     approver=CliApprover(),
 )
@@ -494,8 +508,10 @@ off the event loop with that answer already in hand.
 
 - MCP over streamable HTTP with authentication (stdio only for now, on purpose).
 - Sign audit entries with a key held elsewhere to close the full-rewrite gap.
-- CI, a demo recording, and a `permission-guard check "<command>"` dry-run command.
+- Re-evaluate the policy immediately before a command runs, to shrink the window between the
+  check and the execution (see the threat model).
 - Per-policy glob rules, rate limits, and expiring session grants.
+- An OS-level sandbox (container or seccomp) underneath the policy-level one.
 
 ## License
 
