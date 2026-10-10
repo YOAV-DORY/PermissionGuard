@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from permission_guard import ActionRequest, AuditError, AuditLog, AutoApprover, Decision, Limits
 from permission_guard.approval import CliApprover
 

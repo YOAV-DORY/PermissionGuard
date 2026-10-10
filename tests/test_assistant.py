@@ -96,7 +96,7 @@ def test_tool_failure_is_an_error_but_not_blocked(make_guard):
 
 
 def test_write_passes_content_through(make_guard, sandbox: Path):
-    text, is_error, *_ = execute_tool_call(make_guard(), "write_file", {"path": "n.txt", "content": "hi"})
+    _, is_error, *_ = execute_tool_call(make_guard(), "write_file", {"path": "n.txt", "content": "hi"})
     assert not is_error
     assert (sandbox / "n.txt").read_text() == "hi"
 
@@ -114,7 +114,7 @@ def test_write_passes_content_through(make_guard, sandbox: Path):
     ],
 )
 def test_malformed_calls_never_reach_the_guard(make_guard, audit, name, tool_input):
-    text, is_error, blocked, executed = execute_tool_call(make_guard(), name, tool_input)
+    _, is_error, _, executed = execute_tool_call(make_guard(), name, tool_input)
     assert is_error and not executed
     assert audit.read_all() == []
 

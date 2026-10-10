@@ -16,12 +16,12 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from mcp import StdioServerParameters, types  # noqa: E402
-from mcp.client import Client  # noqa: E402
+from mcp import StdioServerParameters, types
+from mcp.client import Client
 
-from permission_guard import AuditLog  # noqa: E402
-from permission_guard.mcp_server import build_default_server  # noqa: E402
-from tests.conftest import DEFAULT_POLICY, PROJECT_ROOT  # noqa: E402
+from permission_guard import AuditLog
+from permission_guard.mcp_server import build_default_server
+from tests.conftest import DEFAULT_POLICY, PROJECT_ROOT
 
 APPROVE_ONCE = "approve once"
 APPROVE_SESSION = "approve for this session"

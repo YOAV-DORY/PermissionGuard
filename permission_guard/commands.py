@@ -239,9 +239,12 @@ class CommandPolicy:
         for i, piece in enumerate(parsed.pieces):
             if isinstance(piece, Segment):
                 seg_index += 1
-            elif ("<" in piece.text or ">" in piece.text) and i + 1 < len(parsed.pieces):
-                if isinstance(parsed.pieces[i + 1], Segment):
-                    targets.add(seg_index + 1)
+            elif (
+                ("<" in piece.text or ">" in piece.text)
+                and i + 1 < len(parsed.pieces)
+                and isinstance(parsed.pieces[i + 1], Segment)
+            ):
+                targets.add(seg_index + 1)
         return targets
 
     def _check_system_redirect(self, parsed: ParsedCommand) -> PolicyResult | None:
@@ -269,15 +272,14 @@ class CommandPolicy:
             return _deny("shell-interpreter", "dangerous command (shells can run arbitrary command strings)"), False
 
         for rule in self.option_rules:
-            if any(fnmatch.fnmatchcase(prog, pat.lower()) for pat in rule["programs"]):
-                if self._has_option(argv[1:], rule):
-                    return _deny(rule["id"], f"dangerous command ({rule['reason']})"), False
+            matches_program = any(fnmatch.fnmatchcase(prog, pat.lower()) for pat in rule["programs"])
+            if matches_program and self._has_option(argv[1:], rule):
+                return _deny(rule["id"], f"dangerous command ({rule['reason']})"), False
 
         known = any(fnmatch.fnmatchcase(prog, pat) for pat in self.allowed)
-        if not known:
-            if self.unknown_verdict is Decision.DENY:
-                return _deny("unknown-program", f"program '{prog}' is not on the allowlist"), True
-            # unknown_program: ask -> keep checking arguments, ask the human at the end.
+        if not known and self.unknown_verdict is Decision.DENY:
+            return _deny("unknown-program", f"program '{prog}' is not on the allowlist"), True
+        # unknown_program: ask -> keep checking arguments, ask the human at the end.
 
         allowed_subs = self.subcommands.get(prog)
         if allowed_subs is not None and len(argv) > 1 and argv[1] not in allowed_subs:

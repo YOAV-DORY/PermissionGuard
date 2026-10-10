@@ -15,10 +15,10 @@ import pytest
 anthropic = pytest.importorskip("anthropic")
 httpx2 = pytest.importorskip("httpx2")
 
-from permission_guard import AuditLog, AutoApprover, PermissionGuard, PolicyEngine  # noqa: E402
-from permission_guard.assistant import TOOL_DEFINITIONS, run_agent  # noqa: E402
-from permission_guard.llm import DEFAULT_MODEL, FALLBACK_BETA, AnthropicLLM  # noqa: E402
-from tests.conftest import DEFAULT_POLICY  # noqa: E402
+from permission_guard import AuditLog, AutoApprover, PermissionGuard, PolicyEngine
+from permission_guard.assistant import TOOL_DEFINITIONS, run_agent
+from permission_guard.llm import DEFAULT_MODEL, FALLBACK_BETA, AnthropicLLM
+from tests.conftest import DEFAULT_POLICY
 
 
 def message(content: list[dict], stop_reason: str, model: str = DEFAULT_MODEL) -> dict:

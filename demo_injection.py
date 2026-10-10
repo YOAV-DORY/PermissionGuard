@@ -108,7 +108,7 @@ def main() -> int:
     counter = [0]
     try:
         run = run_agent(llm, guard, USER_PROMPT, on_event=lambda e: print_event(e, counter))
-    except Exception as exc:  # noqa: BLE001 - surface API/credential problems without a traceback
+    except Exception as exc:
         if args.live:
             print(f"\nThe live run failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             print("Check ANTHROPIC_API_KEY (or run `ant auth login`).", file=sys.stderr)

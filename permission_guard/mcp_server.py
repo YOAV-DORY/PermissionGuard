@@ -149,7 +149,7 @@ def build_server(
     def decide(ctx: Context, request: ActionRequest) -> "Elicit[ApprovalForm] | Resolution":
         try:
             verdict = guard.policy.evaluate(request)
-        except Exception:  # noqa: BLE001 - the guard re-evaluates and fails closed; nothing to ask about
+        except Exception:
             return Resolution("not_asked")
         if verdict.decision is not Decision.ASK:
             return Resolution("not_asked")  # allow or deny: the guard decides, no human involved
@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(name)s: %(message)s")
     try:
         server = build_default_server(args.policy.resolve(), args.sandbox.resolve(), args.audit_file.resolve(), args.approval)
-    except Exception as exc:  # noqa: BLE001 - a bad policy must stop the server with a readable message
+    except Exception as exc:
         print(f"permission-guard: cannot start: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 

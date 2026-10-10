@@ -14,8 +14,9 @@ and exactly why the guard sits between the model and the tools.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .guard import PermissionGuard
 from .models import Decision
@@ -177,7 +178,7 @@ def run_agent(
     stop_reason = "max_turns"
     turns = 0
 
-    for turns in range(1, max_turns + 1):
+    for turns in range(1, max_turns + 1):  # noqa: B007 - `turns` is read after the loop
         response = llm.create(system=system, messages=messages, tools=tools)
         stop_reason = response.stop_reason or "end_turn"
 

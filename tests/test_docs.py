@@ -61,3 +61,24 @@ def test_committed_recordings_exist_and_are_current(name: str):
     svg = (PROJECT_ROOT / "docs" / name).read_text()
     ET.fromstring(svg)
     assert "DENY / BLOCKED" in svg
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.parametrize("name", ["social-preview.png", "injection.png", "demo.png"])
+def test_committed_images_are_real_pngs(name: str):
+    data = (PROJECT_ROOT / "docs" / "images" / name).read_bytes()
+    assert data.startswith(PNG_SIGNATURE)
+    assert len(data) < 1_000_000, "GitHub social previews must stay under 1 MB"
+
+
+def test_social_preview_has_github_dimensions():
+    header = (PROJECT_ROOT / "docs" / "images" / "social-preview.png").read_bytes()[:32]
+    width, height = int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+    assert (width, height) == (1280, 640)
+
+
+def test_security_policy_exists_and_points_at_the_threat_model():
+    text = (PROJECT_ROOT / "SECURITY.md").read_text()
+    assert "THREAT_MODEL.md" in text and "vulnerability" in text.lower()

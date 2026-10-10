@@ -48,7 +48,7 @@ class PermissionGuard:
     def execute(self, request: ActionRequest) -> GuardResult:
         try:
             verdict = self.policy.evaluate(request)
-        except Exception as exc:  # noqa: BLE001 - a broken policy must never become "allow"
+        except Exception as exc:
             verdict = PolicyResult(Decision.DENY, f"policy error: {type(exc).__name__}: {exc}", "policy-error")
 
         if verdict.decision is Decision.DENY:
@@ -60,7 +60,7 @@ class PermissionGuard:
         # Decision.ASK
         try:
             response = self.approver.ask(request, verdict.reason, verdict.details)
-        except Exception as exc:  # noqa: BLE001 - an approver that crashes means "no"
+        except Exception as exc:
             return self._deny(request, f"approval error: {type(exc).__name__}: {exc}", approver="policy")
 
         if not response.approved:
@@ -92,7 +92,7 @@ class PermissionGuard:
         params = {k: v for k, v in request.params.items() if k != "limits"}
         try:
             output = tool(self.sandbox_root, request.target, limits=self.policy.limits, **params)
-        except Exception as exc:  # noqa: BLE001 - any tool failure must be audited, not raised
+        except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             note = self._record(
                 request, Decision.ALLOW, "execution failed", approver, result=f"error: {error}"
@@ -118,6 +118,6 @@ class PermissionGuard:
                     result=result,
                 )
             )
-        except Exception as exc:  # noqa: BLE001 - AuditError or any I/O problem
+        except Exception as exc:
             return f"audit write failed: {type(exc).__name__}: {exc}"
         return ""

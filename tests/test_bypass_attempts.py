@@ -88,7 +88,7 @@ def command_attacks(arena) -> list[str]:
         f"/bin/sh -c 'rm {canary}'",
         f"sudo rm {canary}",
         f"python3 -c \"import os; os.remove('{canary}')\"",
-        f"python -m pip install x",
+        "python -m pip install x",
         # chaining and substitution
         f"ls; rm {canary}",
         f"ls && rm {canary}",

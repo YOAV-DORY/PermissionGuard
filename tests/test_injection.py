@@ -14,7 +14,7 @@ from permission_guard.simulated import GullibleLLM
 from tests.conftest import DEFAULT_POLICY, PROJECT_ROOT
 
 sys.path.insert(0, str(PROJECT_ROOT))
-from demo_injection import REPORT_TEXT, USER_PROMPT  # noqa: E402
+from demo_injection import REPORT_TEXT, USER_PROMPT
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def test_injected_instructions_are_blocked_when_the_human_declines(arena):
 
 
 def test_a_human_approval_only_covers_the_ask_not_the_denials(arena):
-    guard, audit = arena["make"](approve=True)
+    guard, _ = arena["make"](approve=True)
     run = run_agent(GullibleLLM(), guard, USER_PROMPT)
 
     assert run.blocked == 2  # the two policy denials stay denied even with an approver that says yes to everything

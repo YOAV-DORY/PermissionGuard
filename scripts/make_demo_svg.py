@@ -114,7 +114,7 @@ def run_demo(preset: Preset) -> list[str]:
         session.pop()
     integrity = next(ln for ln in lines if ln.startswith("Integrity check"))
     result = [ln for ln in lines if ln.startswith("Result:")]
-    return session + ["", integrity] + ([""] + result if result else [])
+    return [*session, "", integrity, *(["", *result] if result else [])]
 
 
 # ---------------------------------------------------------------- styling
@@ -189,7 +189,8 @@ def build_lines(session: list[str], command: str, answer: str) -> list[Line]:
 # ---------------------------------------------------------------- rendering
 
 
-def render_svg(lines: list[Line], title: str, alt: str) -> str:
+def render_svg(lines: list[Line], title: str, alt: str, static: bool = False) -> str:
+    """Render the animated SVG; with ``static=True`` render only the final frame (for PNG export)."""
     total = max((ln.show for ln in lines), default=0) + END_PAUSE
     max_chars = max(ln.length for ln in lines)
     width = int(max_chars * CHAR_WIDTH * 1.06 + PAD_X * 2)
@@ -199,8 +200,10 @@ def render_svg(lines: list[Line], title: str, alt: str) -> str:
     height = TITLE_BAR + (rows[-1] + 1) * LINE_HEIGHT + PAD_BOTTOM
 
     css = [STYLE % {"fs": FONT_SIZE}]
+    if static:
+        css.append("  .a { display: none; }")
     body: list[str] = []
-    for i, (ln, row) in enumerate(zip(lines, rows)):
+    for i, (ln, row) in enumerate(zip(lines, rows, strict=True)):
         p_show = ln.show / total * 100
         keyframes = f"0%,{p_show:.3f}%{{opacity:0}}{p_show + 0.01:.3f}%"
         if ln.hide is not None:
@@ -208,12 +211,13 @@ def render_svg(lines: list[Line], title: str, alt: str) -> str:
             keyframes += f",{p_hide:.3f}%{{opacity:1}}{p_hide + 0.01:.3f}%,100%{{opacity:0}}"
         else:
             keyframes += ",99.5%{opacity:1}100%{opacity:0}"
-        css.append(f"  @keyframes k{i} {{{keyframes}}}")
-        css.append(f"  .k{i} {{ animation: k{i} {total:.2f}s linear infinite; }}")
+        if not static:
+            css.append(f"  @keyframes k{i} {{{keyframes}}}")
+            css.append(f"  .k{i} {{ animation: k{i} {total:.2f}s linear infinite; }}")
 
         y = TITLE_BAR + (row + 1) * LINE_HEIGHT - 5
         spans = "".join(f'<tspan class="{cls}">{escape(text)}</tspan>' for text, cls in ln.segments)
-        classes = f"t l k{i}" + (" a" if ln.replaced else "")
+        classes = "t" + ("" if static else f" l k{i}") + (" a" if ln.replaced else "")
         body.append(f'<text x="{PAD_X}" y="{y}" class="{classes}" xml:space="preserve">{spans}</text>')
 
     return (
@@ -229,9 +233,11 @@ def render_svg(lines: list[Line], title: str, alt: str) -> str:
     )
 
 
-def generate(name: str, output: Path | None = None) -> Path:
+def generate(name: str, output: Path | None = None, static: bool = False) -> Path:
     preset = PRESETS[name]
-    svg = render_svg(build_lines(run_demo(preset), f"python {preset.script}", preset.answer), preset.title, preset.alt)
+    svg = render_svg(
+        build_lines(run_demo(preset), f"python {preset.script}", preset.answer), preset.title, preset.alt, static=static
+    )
     target = output or preset.output
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(svg, encoding="utf-8")
@@ -243,11 +249,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--which", choices=[*PRESETS, "all"], default="all")
     parser.add_argument("--output", type=Path, help="output path (only with a single --which)")
+    parser.add_argument("--static", action="store_true", help="render the final frame only (no animation), e.g. for PNG export")
     args = parser.parse_args()
     if args.output and args.which == "all":
         parser.error("--output needs --which demo|injection")
     for name in PRESETS if args.which == "all" else [args.which]:
-        generate(name, args.output)
+        generate(name, args.output, args.static)
     return 0
 
 

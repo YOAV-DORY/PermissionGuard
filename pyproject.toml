@@ -2,11 +2,17 @@
 name = "permission-guard"
 version = "0.1.0"
 description = "Policy-enforcing middleware between an AI assistant and computer tools, with approval flow and audit log."
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0"]
 
+[project.urls]
+Homepage = "https://github.com/YOAV-DORY/PermissionGuard"
+Issues = "https://github.com/YOAV-DORY/PermissionGuard/issues"
+
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff"]
 llm = ["anthropic>=1.13"]
 mcp = ["mcp>=2.3,<3"]
 
@@ -20,3 +26,20 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["permission_guard"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is handled by the formatter's judgement, not enforced
+    "SIM105",  # contextlib.suppress would hide intent in the security-sensitive except blocks
+    "RUF001", "RUF002", "RUF003",  # ambiguous unicode in comments/strings is intentional (ellipsis in tables)
+    "UP042",   # Decision(str, Enum) is kept explicit; StrEnum would change str() output
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "SIM117", "RUF012", "E402"]

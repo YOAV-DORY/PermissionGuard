@@ -80,7 +80,7 @@ def validate_config(config: Any) -> None:
     actions = config.get("actions", {})
     _require(isinstance(actions, dict), "'actions' must be a mapping")
     for name, rule in actions.items():
-        _require(name in PATH_ACTIONS + (COMMAND_ACTION,), f"unknown action '{name}' in 'actions'")
+        _require(name in (*PATH_ACTIONS, COMMAND_ACTION), f"unknown action '{name}' in 'actions'")
         _require(isinstance(rule, dict), f"actions.{name} must be a mapping")
         key = "default" if name == COMMAND_ACTION else "inside_sandbox"
         _require(set(rule) <= {key}, f"actions.{name} may only contain '{key}'")
@@ -146,7 +146,7 @@ class PolicyEngine:
         self.commands = CommandPolicy(config.get("commands", {}), self.sandbox_root, run_verdict, self.limits)
 
     @classmethod
-    def from_yaml(cls, path: str | Path, sandbox_root: str | Path | None = None) -> "PolicyEngine":
+    def from_yaml(cls, path: str | Path, sandbox_root: str | Path | None = None) -> PolicyEngine:
         """Load a policy file. ``sandbox_root`` overrides the value in the file."""
         path = Path(path)
         try:
